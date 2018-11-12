@@ -28,16 +28,19 @@ oc apply -f examples/templates/cluster-operator -n strimzi-home
 ## Configuring Operator to manage a project
 ### Create the project and assign necessary roles. In this case developer has been granted admin privileges on the new project.
 ```
-oc new-project kafka-deploy1 --display-name="Kafka Demo Cluster 1"
-oc adm policy add-role-to-user admin developer -n kafka-deploy1
+oc new-project kafka1 --display-name="Kafka Demo Cluster 1"
+oc adm policy add-role-to-user admin developer -n kafka1
 ```
 
 ### Update the rolebindings
 ```
-sed -i '' 's/namespace: .*/namespace: my-namespace/' install/cluster-operator/*RoleBinding*.yaml
-oc apply -f install/cluster-operator/020-RoleBinding-strimzi-cluster-operator.yaml -n kafka-deploy1
-oc apply -f install/cluster-operator/031-RoleBinding-strimzi-cluster-operator-entity-operator-delegation.yaml -n kafka-deploy1
-oc apply -f install/cluster-operator/032-RoleBinding-strimzi-cluster-operator-topic-operator-delegation.yaml -n kafka-deploy1
+# No need to do this step, if cluster operator is already installed
+sed -i '' 's/namespace: .*/namespace: strimzi-home/' install/cluster-operator/*RoleBinding*.yaml
+
+# Grant service account to have access on new project, where we intend to manage kafka
+oc apply -f install/cluster-operator/020-RoleBinding-strimzi-cluster-operator.yaml -n kafka1
+oc apply -f install/cluster-operator/031-RoleBinding-strimzi-cluster-operator-entity-operator-delegation.yaml -n kafka1
+oc apply -f install/cluster-operator/032-RoleBinding-strimzi-cluster-operator-topic-operator-delegation.yaml -n kafka1
 ```
 
 ### Configure the operator to manage the new namespace aka project by updating *STRIMZI_NAMESPACE*
@@ -48,7 +51,7 @@ This is done by updating *STRIMZI_NAMESPACE* variable in *install/cluster-operat
         imagePullPolicy: IfNotPresent
         env:
         - name: STRIMZI_NAMESPACE
-          value: kafka-deploy1
+          value: kafka1
 ```
 
 ```
@@ -56,7 +59,7 @@ oc apply -f install/cluster-operator/050-Deployment-strimzi-cluster-operator.yam
 ```
 or
 ```
-oc set env deployment/strimzi-cluster-operator STRIMZI_NAMESPACE=kafka-deploy1
+oc set env deployment/strimzi-cluster-operator STRIMZI_NAMESPACE=kafka1
 ```
 ## Deploying
 Now that project where we intend to deploy kafka cluster is setup and is watched by the operator, we can submit a CRD to provision the cluster
