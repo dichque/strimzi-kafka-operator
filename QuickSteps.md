@@ -65,7 +65,7 @@ oc apply -f install/cluster-operator/050-Deployment-strimzi-cluster-operator.yam
 ```
 or
 ```
-oc set env deployment/strimzi-cluster-operator STRIMZI_NAMESPACE=strimzi,kafka-1
+oc set env deployment/strimzi-cluster-operator STRIMZI_NAMESPACE=strimzi,kafka-1 -n strimzi
 ```
 
 ## Granting developer permissions to create cluster
@@ -128,6 +128,11 @@ oc apply -f examples/kafka/kafka-ephemeral.yaml
 
 
 ## Sample publishing and consuming
+* Create test topic
+```bash
+oc apply -f examples/topic/kafka-topic.yaml
+```
+
 * Producer
 
 ```
@@ -137,7 +142,7 @@ oc run kafka-producer -ti --image=strimzi/kafka:latest --rm=true --restart=Never
 
 
 ```
-oc run kafka-consumer -ti --image=strimzi/kafka:latest --rm=true --restart=Never -- bin/kafka-console-consumer.sh --bootstraperver my-cluster-kafka-bootstrap:9092 --topic my-topic --from-beginning
+oc run kafka-consumer -ti --image=strimzi/kafka:latest --rm=true --restart=Never -- bin/kafka-console-consumer.sh --bootstrap-server my-cluster-kafka-bootstrap:9092 --topic my-topic --from-beginning
 ```
 
 ## Monitoring

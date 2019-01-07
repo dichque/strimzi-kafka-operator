@@ -1,0 +1,108 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: burrow
+  labels:
+    k8s-app: burrow
+spec:
+  selector:
+    k8s-app: burrow
+  ports:
+  - name: metrics
+    port: 8080
+---
+kind: ConfigMap
+metadata:
+  name: burrow-config
+apiVersion: v1
+data:
+  burrow.toml: |-
+    [general]
+    access-control-allow-origin="*"
+
+    [logging]
+    level="info"
+
+    [zookeeper]
+    # Refer: https://github.com/strimzi/strimzi-kafka-operator/issues/673
+    # Zookeeper port 2181 is exposed via stunnel, above is alternative option
+    servers=["my-cluster-zookeeper-0.my-cluster-zookeeper-nodes:21810","my-cluster-zookeeper-1.my-cluster-zookeeper-nodes:21811","my-cluster-zookeeper-2.my-cluster-zookeeper-nodes:21812"]
+
+    [client-profile.kafka-profile]
+    kafka-version="2.0.1"
+    client-id="burrow-client"
+
+    [cluster.my-cluster]
+    class-name="kafka"
+    client-profile="kafka-profile"
+    servers=["my-cluster-kafka-bootstrap:9092"]
+    topic-refresh=120
+    offset-refresh=10
+
+    [consumer.consumer_kafka]
+    class-name="kafka"
+    cluster="my-cluster"
+    servers=["my-cluster-kafka-bootstrap:9092"]
+    client-profile="kafka-profile"
+    start-latest=true
+    offsets-topic="__consumer_offsets"
+    group-whitelist=".*"
+    group-blacklist="^(console-consumer-|python-kafka-consumer-).*$"
+
+    [httpserver.default]
+    address=":8000"
+---
+apiVersion: apps/v1beta2
+kind: Deployment
+metadata:
+  name: burrow
+  labels:
+    k8s-app: burrow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      k8s-app: burrow
+  template:
+    metadata:
+      labels:
+        k8s-app: burrow
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+    spec:
+      containers:
+      - name: burrow
+        image: dichque/burrow
+        ports:
+        - name: api
+          containerPort: 8000
+        readinessProbe:
+          httpGet:
+            path: /burrow/admin
+            port: 8000
+        livenessProbe:
+          httpGet:
+            path: /burrow/admin
+            port: 8000
+        volumeMounts:
+        - name: config
+          mountPath: /etc/burrow/config
+      - name: burrow-exporter
+        image: solsson/burrow-exporter
+        ports:
+        - name: metrics
+          containerPort: 8080
+        env:
+        - name: BURROW_ADDR
+          value: http://localhost:8000
+        - name: METRICS_ADDR
+          value: 0.0.0.0:8080
+        - name: INTERVAL
+          value: "15"
+        - name: API_VERSION
+          value: "3"
+      volumes:
+      - name: config
+        configMap:
+          name: burrow-config

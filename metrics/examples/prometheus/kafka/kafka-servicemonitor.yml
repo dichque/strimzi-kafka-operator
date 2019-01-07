@@ -1,0 +1,99 @@
+apiVersion: template.openshift.io/v1
+kind: Template
+metadata:
+  name: kafka-prometheus-service-monitor
+  labels:
+    app: kafka-prometheus-service-monitor
+  annotations:
+    openshift.io/display-name: "Red Hat Kafka service-monitor install"
+    openshift.io/provider-display-name: "Red Hat, Inc."
+    description: "A ServiceMonitor specifies how groups of services should be monitored - this template defines how to monitor a Kafka application for Prometheus."
+    tags: "kafka,prometheus,prometheus-operator,monitoring"
+    iconClass: "icon-rh-integration"
+    version: "1.0"
+message: |-
+  prometheus-operator is now deployed to ${NAMESPACE}
+parameters:
+- name: NAMESPACE
+  displayName: Namespace
+  value: kafka-1
+  required: true
+  description: Namespace in which the prometheus-operator is installed.
+- name: KAFKA_CLUSTER_NAME
+  displayName: Kafka Cluster Name
+  value: 'my-cluster'
+  required: true
+  description: The cluster name of the Kafka application to monitor.
+- name: KAFKA_SERVICE_TEAM
+  displayName: Kafka Service Team
+  value: 'aims'
+  required: true
+- name: ENDPOINT_PORT
+  displayName: Endpoint port
+  value: 'metrics'
+  required: true
+
+objects:
+#
+# OpenShift resources
+#
+- apiVersion: monitoring.coreos.com/v1
+  kind: ServiceMonitor
+  metadata:
+    name: ${KAFKA_CLUSTER_NAME}-zookeeper
+    namespace: ${NAMESPACE}
+    labels:
+      team: ${KAFKA_SERVICE_TEAM}
+  spec:
+    selector:
+      matchLabels:
+        strimzi.io/name: ${KAFKA_CLUSTER_NAME}-zookeeper-client
+    endpoints:
+    - port: ${ENDPOINT_PORT}
+
+- apiVersion: monitoring.coreos.com/v1
+  kind: ServiceMonitor
+  metadata:
+    name: ${KAFKA_CLUSTER_NAME}-kafka
+    namespace: ${NAMESPACE}
+    labels:
+      team: ${KAFKA_SERVICE_TEAM}
+  spec:
+    selector:
+      matchLabels:
+        strimzi.io/name: ${KAFKA_CLUSTER_NAME}-kafka-bootstrap
+    endpoints:
+    - port: ${ENDPOINT_PORT}
+
+
+- apiVersion: monitoring.coreos.com/v1
+  kind: ServiceMonitor
+  metadata:
+    name: ${KAFKA_CLUSTER_NAME}-burrow
+    namespace: ${NAMESPACE}
+    labels:
+      team: ${KAFKA_SERVICE_TEAM}
+  spec:
+    selector:
+      matchLabels:
+        k8s-app: burrow
+    namespaceSelector:
+      matchNames:
+      - ${NAMESPACE}
+    endpoints:
+    - port: ${ENDPOINT_PORT}
+
+
+# - apiVersion: v1
+#   kind: Service
+#   metadata:
+#     name: ${KAFKA_CLUSTER_NAME}
+#     namespace: ${NAMESPACE}
+#     labels:
+#       app: ${KAFKA_CLUSTER_NAME}
+#   spec:
+#     selector:
+#       app: ${KAFKA_CLUSTER_NAME}
+#     ports:
+#     - name: ${ENDPOINT_PORT}
+#       port: 8080
