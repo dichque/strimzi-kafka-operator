@@ -7,6 +7,7 @@ package io.strimzi.operator.cluster.operator.assembly;
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
 import io.fabric8.kubernetes.api.model.Service;
+import io.fabric8.kubernetes.api.model.policy.PodDisruptionBudget;
 import io.fabric8.openshift.api.model.BuildConfig;
 import io.fabric8.openshift.api.model.DeploymentConfig;
 import io.fabric8.openshift.api.model.ImageStream;
@@ -14,6 +15,7 @@ import io.strimzi.api.kafka.model.KafkaConnectS2I;
 import io.strimzi.operator.cluster.ResourceUtils;
 import io.strimzi.operator.cluster.model.AbstractModel;
 import io.strimzi.operator.cluster.model.KafkaConnectS2ICluster;
+import io.strimzi.operator.cluster.model.KafkaVersion;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.operator.common.model.ResourceType;
@@ -24,6 +26,7 @@ import io.strimzi.operator.common.operator.resource.CrdOperator;
 import io.strimzi.operator.common.operator.resource.DeploymentConfigOperator;
 import io.strimzi.operator.common.operator.resource.ImageStreamOperator;
 import io.strimzi.operator.common.operator.resource.NetworkPolicyOperator;
+import io.strimzi.operator.common.operator.resource.PodDisruptionBudgetOperator;
 import io.strimzi.operator.common.operator.resource.ReconcileResult;
 import io.strimzi.operator.common.operator.resource.SecretOperator;
 import io.strimzi.operator.common.operator.resource.ServiceOperator;
@@ -39,6 +42,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
 
+import java.io.StringReader;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -48,6 +52,8 @@ import java.util.Set;
 import java.util.concurrent.CopyOnWriteArraySet;
 
 import static java.util.Arrays.asList;
+import static java.util.Collections.emptyMap;
+import static java.util.Collections.singletonMap;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -60,6 +66,10 @@ import static org.mockito.Mockito.when;
 @RunWith(VertxUnitRunner.class)
 public class KafkaConnectS2IAssemblyOperatorTest {
 
+    private static final KafkaVersion.Lookup VERSIONS = new KafkaVersion.Lookup(new StringReader(
+            "2.0.0 default 2.0 2.0 1234567890abcdef"),
+            emptyMap(), emptyMap(), singletonMap("2.0.0", "strimzi/kafka-connect:latest-kafka-2.0.0"),
+            emptyMap()) { };
     protected static Vertx vertx;
     public static final String METRICS_CONFIG = "{\"foo\":\"bar\"}";
     public static final String LOGGING_CONFIG = "#Do not change this generated file. Logging can be configured in the corresponding kubernetes/openshift resource.\n" +
@@ -93,6 +103,7 @@ public class KafkaConnectS2IAssemblyOperatorTest {
         ImageStreamOperator mockIsOps = mock(ImageStreamOperator.class);
         SecretOperator mockSecretOps = mock(SecretOperator.class);
         NetworkPolicyOperator networkPolicyOperator = mock(NetworkPolicyOperator.class);
+        PodDisruptionBudgetOperator mockPdbOps = mock(PodDisruptionBudgetOperator.class);
 
         String clusterCmName = "foo";
         String clusterCmNamespace = "test";
@@ -114,14 +125,19 @@ public class KafkaConnectS2IAssemblyOperatorTest {
         ArgumentCaptor<BuildConfig> bcCaptor = ArgumentCaptor.forClass(BuildConfig.class);
         when(mockBcOps.reconcile(anyString(), anyString(), bcCaptor.capture())).thenReturn(Future.succeededFuture());
 
+        ArgumentCaptor<String> pdbNamespaceCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> pdbNameCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<PodDisruptionBudget> pdbCaptor = ArgumentCaptor.forClass(PodDisruptionBudget.class);
+        when(mockPdbOps.reconcile(pdbNamespaceCaptor.capture(), pdbNameCaptor.capture(), pdbCaptor.capture())).thenReturn(Future.succeededFuture());
+
         when(mockConnectOps.reconcile(anyString(), any(), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(null)));
         when(mockCmOps.reconcile(anyString(), any(), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(null)));
         KafkaConnectS2IAssemblyOperator ops = new KafkaConnectS2IAssemblyOperator(vertx, true,
                 new MockCertManager(),
                 mockConnectOps,
-                mockCmOps, mockDcOps, mockServiceOps, mockIsOps, mockBcOps, mockSecretOps, networkPolicyOperator);
+                mockCmOps, mockDcOps, mockServiceOps, mockIsOps, mockBcOps, mockSecretOps, networkPolicyOperator, mockPdbOps, VERSIONS);
 
-        KafkaConnectS2ICluster connect = KafkaConnectS2ICluster.fromCrd(clusterCm);
+        KafkaConnectS2ICluster connect = KafkaConnectS2ICluster.fromCrd(clusterCm, VERSIONS);
 
         Async async = context.async();
         ops.createOrUpdate(new Reconciliation("test-trigger", ResourceType.CONNECT_S2I, clusterCmNamespace, clusterCmName), clusterCm).setHandler(createResult -> {
@@ -149,6 +165,13 @@ public class KafkaConnectS2IAssemblyOperatorTest {
             BuildConfig bc = capturedBc.get(0);
             context.assertEquals(connect.getName(), dc.getMetadata().getName());
             context.assertEquals(connect.generateBuildConfig(), bc, "Build Configs are not equal");
+
+            // Verify PodDisruptionBudget
+            List<PodDisruptionBudget> capturedPdb = pdbCaptor.getAllValues();
+            context.assertEquals(1, capturedPdb.size());
+            PodDisruptionBudget pdb = capturedPdb.get(0);
+            context.assertEquals(connect.getName(), pdb.getMetadata().getName());
+            context.assertEquals(connect.generatePodDisruptionBudget(), pdb, "PodDisruptionBudgets are not equal");
 
             // Verify Image Streams
             List<ImageStream> capturedIs = isCaptor.getAllValues();
@@ -178,18 +201,20 @@ public class KafkaConnectS2IAssemblyOperatorTest {
         ImageStreamOperator mockIsOps = mock(ImageStreamOperator.class);
         SecretOperator mockSecretOps = mock(SecretOperator.class);
         NetworkPolicyOperator networkPolicyOperator = mock(NetworkPolicyOperator.class);
+        PodDisruptionBudgetOperator mockPdbOps = mock(PodDisruptionBudgetOperator.class);
 
         String clusterCmName = "foo";
         String clusterCmNamespace = "test";
 
         KafkaConnectS2I clusterCm = ResourceUtils.createEmptyKafkaConnectS2ICluster(clusterCmNamespace, clusterCmName);
-        KafkaConnectS2ICluster connect = KafkaConnectS2ICluster.fromCrd(clusterCm);
+        KafkaConnectS2ICluster connect = KafkaConnectS2ICluster.fromCrd(clusterCm, VERSIONS);
         when(mockConnectOps.get(clusterCmNamespace, clusterCmName)).thenReturn(clusterCm);
         when(mockServiceOps.get(clusterCmNamespace, connect.getName())).thenReturn(connect.generateService());
         when(mockDcOps.get(clusterCmNamespace, connect.getName())).thenReturn(connect.generateDeploymentConfig(new HashMap<String, String>(), true));
         when(mockIsOps.get(clusterCmNamespace, connect.getSourceImageStreamName())).thenReturn(connect.generateSourceImageStream());
         when(mockIsOps.get(clusterCmNamespace, connect.getName())).thenReturn(connect.generateTargetImageStream());
         when(mockBcOps.get(clusterCmNamespace, connect.getName())).thenReturn(connect.generateBuildConfig());
+        when(mockPdbOps.get(clusterCmNamespace, connect.getName())).thenReturn(connect.generatePodDisruptionBudget());
 
         ArgumentCaptor<String> serviceNamespaceCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> serviceNameCaptor = ArgumentCaptor.forClass(String.class);
@@ -221,13 +246,18 @@ public class KafkaConnectS2IAssemblyOperatorTest {
         ArgumentCaptor<BuildConfig> bcCaptor = ArgumentCaptor.forClass(BuildConfig.class);
         when(mockBcOps.reconcile(bcNamespaceCaptor.capture(), bcNameCaptor.capture(), bcCaptor.capture())).thenReturn(Future.succeededFuture());
 
+        ArgumentCaptor<String> pdbNamespaceCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> pdbNameCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<PodDisruptionBudget> pdbCaptor = ArgumentCaptor.forClass(PodDisruptionBudget.class);
+        when(mockPdbOps.reconcile(pdbNamespaceCaptor.capture(), pdbNameCaptor.capture(), pdbCaptor.capture())).thenReturn(Future.succeededFuture());
+
         when(mockConnectOps.reconcile(anyString(), any(), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(null)));
         when(mockCmOps.reconcile(anyString(), any(), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(null)));
 
         KafkaConnectS2IAssemblyOperator ops = new KafkaConnectS2IAssemblyOperator(vertx, true,
                 new MockCertManager(),
                 mockConnectOps,
-                mockCmOps, mockDcOps, mockServiceOps, mockIsOps, mockBcOps, mockSecretOps, networkPolicyOperator);
+                mockCmOps, mockDcOps, mockServiceOps, mockIsOps, mockBcOps, mockSecretOps, networkPolicyOperator, mockPdbOps, VERSIONS);
 
         Async async = context.async();
         ops.createOrUpdate(new Reconciliation("test-trigger", ResourceType.CONNECT_S2I, clusterCmNamespace, clusterCmName), clusterCm).setHandler(createResult -> {
@@ -244,6 +274,10 @@ public class KafkaConnectS2IAssemblyOperatorTest {
             // Verify Build Config
             List<BuildConfig> capturedBc = bcCaptor.getAllValues();
             context.assertEquals(1, capturedBc.size());
+
+            // Verify PodDisruptionBudget
+            List<PodDisruptionBudget> capturedPdb = pdbCaptor.getAllValues();
+            context.assertEquals(1, capturedPdb.size());
 
             // Verify Image Streams
             List<ImageStream> capturedIs = isCaptor.getAllValues();
@@ -267,12 +301,13 @@ public class KafkaConnectS2IAssemblyOperatorTest {
         ImageStreamOperator mockIsOps = mock(ImageStreamOperator.class);
         SecretOperator mockSecretOps = mock(SecretOperator.class);
         NetworkPolicyOperator networkPolicyOperator = mock(NetworkPolicyOperator.class);
+        PodDisruptionBudgetOperator mockPdbOps = mock(PodDisruptionBudgetOperator.class);
 
         String clusterCmName = "foo";
         String clusterCmNamespace = "test";
 
         KafkaConnectS2I clusterCm = ResourceUtils.createEmptyKafkaConnectS2ICluster(clusterCmNamespace, clusterCmName);
-        KafkaConnectS2ICluster connect = KafkaConnectS2ICluster.fromCrd(clusterCm);
+        KafkaConnectS2ICluster connect = KafkaConnectS2ICluster.fromCrd(clusterCm, VERSIONS);
         clusterCm.getSpec().setImage("some/different:image"); // Change the image to generate some diff
 
         when(mockConnectOps.get(clusterCmNamespace, clusterCmName)).thenReturn(clusterCm);
@@ -281,6 +316,7 @@ public class KafkaConnectS2IAssemblyOperatorTest {
         when(mockIsOps.get(clusterCmNamespace, connect.getSourceImageStreamName())).thenReturn(connect.generateSourceImageStream());
         when(mockIsOps.get(clusterCmNamespace, connect.getName())).thenReturn(connect.generateTargetImageStream());
         when(mockBcOps.get(clusterCmNamespace, connect.getName())).thenReturn(connect.generateBuildConfig());
+        when(mockPdbOps.get(clusterCmNamespace, connect.getName())).thenReturn(connect.generatePodDisruptionBudget());
 
         ArgumentCaptor<String> serviceNamespaceCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> serviceNameCaptor = ArgumentCaptor.forClass(String.class);
@@ -314,6 +350,11 @@ public class KafkaConnectS2IAssemblyOperatorTest {
 
         when(mockConnectOps.reconcile(anyString(), any(), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(null)));
 
+        ArgumentCaptor<String> pdbNamespaceCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> pdbNameCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<PodDisruptionBudget> pdbCaptor = ArgumentCaptor.forClass(PodDisruptionBudget.class);
+        when(mockPdbOps.reconcile(pdbNamespaceCaptor.capture(), pdbNameCaptor.capture(), pdbCaptor.capture())).thenReturn(Future.succeededFuture());
+
         // Mock CM get
         when(mockConnectOps.get(clusterCmNamespace, clusterCmName)).thenReturn(clusterCm);
         ConfigMap metricsCm = new ConfigMapBuilder().withNewMetadata()
@@ -334,13 +375,13 @@ public class KafkaConnectS2IAssemblyOperatorTest {
         KafkaConnectS2IAssemblyOperator ops = new KafkaConnectS2IAssemblyOperator(vertx, true,
                 new MockCertManager(),
                 mockConnectOps,
-                mockCmOps, mockDcOps, mockServiceOps, mockIsOps, mockBcOps, mockSecretOps, networkPolicyOperator);
+                mockCmOps, mockDcOps, mockServiceOps, mockIsOps, mockBcOps, mockSecretOps, networkPolicyOperator, mockPdbOps, VERSIONS);
 
         Async async = context.async();
         ops.createOrUpdate(new Reconciliation("test-trigger", ResourceType.CONNECT_S2I, clusterCmNamespace, clusterCmName), clusterCm).setHandler(createResult -> {
             context.assertTrue(createResult.succeeded());
 
-            KafkaConnectS2ICluster compareTo = KafkaConnectS2ICluster.fromCrd(clusterCm);
+            KafkaConnectS2ICluster compareTo = KafkaConnectS2ICluster.fromCrd(clusterCm, VERSIONS);
 
             // Vertify service
             List<Service> capturedServices = serviceCaptor.getAllValues();
@@ -362,8 +403,15 @@ public class KafkaConnectS2IAssemblyOperatorTest {
             List<BuildConfig> capturedBc = bcCaptor.getAllValues();
             context.assertEquals(1, capturedBc.size());
             BuildConfig bc = capturedBc.get(0);
-            context.assertEquals(compareTo.getName(), dc.getMetadata().getName());
+            context.assertEquals(compareTo.getName(), bc.getMetadata().getName());
             context.assertEquals(compareTo.generateBuildConfig(), bc, "Build Configs are not equal");
+
+            // Verify PodDisruptionBudget
+            List<PodDisruptionBudget> capturedPdb = pdbCaptor.getAllValues();
+            context.assertEquals(1, capturedPdb.size());
+            PodDisruptionBudget pdb = capturedPdb.get(0);
+            context.assertEquals(compareTo.getName(), pdb.getMetadata().getName());
+            context.assertEquals(compareTo.generatePodDisruptionBudget(), pdb, "PodDisruptionBudgets are not equal");
 
             // Verify Image Streams
             List<ImageStream> capturedIs = isCaptor.getAllValues();
@@ -393,12 +441,13 @@ public class KafkaConnectS2IAssemblyOperatorTest {
         ImageStreamOperator mockIsOps = mock(ImageStreamOperator.class);
         SecretOperator mockSecretOps = mock(SecretOperator.class);
         NetworkPolicyOperator networkPolicyOperator = mock(NetworkPolicyOperator.class);
+        PodDisruptionBudgetOperator mockPdbOps = mock(PodDisruptionBudgetOperator.class);
 
         String clusterCmName = "foo";
         String clusterCmNamespace = "test";
 
         KafkaConnectS2I clusterCm = ResourceUtils.createEmptyKafkaConnectS2ICluster(clusterCmNamespace, clusterCmName);
-        KafkaConnectS2ICluster connect = KafkaConnectS2ICluster.fromCrd(clusterCm);
+        KafkaConnectS2ICluster connect = KafkaConnectS2ICluster.fromCrd(clusterCm, VERSIONS);
         clusterCm.getSpec().setImage("some/different:image"); // Change the image to generate some diff
 
         when(mockConnectOps.get(clusterCmNamespace, clusterCmName)).thenReturn(clusterCm);
@@ -407,6 +456,7 @@ public class KafkaConnectS2IAssemblyOperatorTest {
         when(mockIsOps.get(clusterCmNamespace, connect.getSourceImageStreamName())).thenReturn(connect.generateSourceImageStream());
         when(mockIsOps.get(clusterCmNamespace, connect.getName())).thenReturn(connect.generateTargetImageStream());
         when(mockBcOps.get(clusterCmNamespace, connect.getName())).thenReturn(connect.generateBuildConfig());
+        when(mockPdbOps.get(clusterCmNamespace, connect.getName())).thenReturn(connect.generatePodDisruptionBudget());
 
         ArgumentCaptor<String> serviceNamespaceCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> serviceNameCaptor = ArgumentCaptor.forClass(String.class);
@@ -440,11 +490,12 @@ public class KafkaConnectS2IAssemblyOperatorTest {
 
         when(mockConnectOps.reconcile(anyString(), any(), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(null)));
         when(mockCmOps.reconcile(anyString(), any(), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(null)));
+        when(mockPdbOps.reconcile(any(), any(), any())).thenReturn(Future.succeededFuture());
 
         KafkaConnectS2IAssemblyOperator ops = new KafkaConnectS2IAssemblyOperator(vertx, true,
                 new MockCertManager(),
                 mockConnectOps,
-                mockCmOps, mockDcOps, mockServiceOps, mockIsOps, mockBcOps, mockSecretOps, networkPolicyOperator);
+                mockCmOps, mockDcOps, mockServiceOps, mockIsOps, mockBcOps, mockSecretOps, networkPolicyOperator, mockPdbOps, VERSIONS);
 
 
         Async async = context.async();
@@ -467,12 +518,13 @@ public class KafkaConnectS2IAssemblyOperatorTest {
         ImageStreamOperator mockIsOps = mock(ImageStreamOperator.class);
         SecretOperator mockSecretOps = mock(SecretOperator.class);
         NetworkPolicyOperator networkPolicyOperator = mock(NetworkPolicyOperator.class);
+        PodDisruptionBudgetOperator mockPdbOps = mock(PodDisruptionBudgetOperator.class);
 
         String clusterCmName = "foo";
         String clusterCmNamespace = "test";
 
         KafkaConnectS2I clusterCm = ResourceUtils.createEmptyKafkaConnectS2ICluster(clusterCmNamespace, clusterCmName);
-        KafkaConnectS2ICluster connect = KafkaConnectS2ICluster.fromCrd(clusterCm);
+        KafkaConnectS2ICluster connect = KafkaConnectS2ICluster.fromCrd(clusterCm, VERSIONS);
         clusterCm.getSpec().setReplicas(scaleTo); // Change replicas to create ScaleUp
 
         when(mockConnectOps.get(clusterCmNamespace, clusterCmName)).thenReturn(clusterCm);
@@ -481,9 +533,9 @@ public class KafkaConnectS2IAssemblyOperatorTest {
         when(mockIsOps.get(clusterCmNamespace, connect.getSourceImageStreamName())).thenReturn(connect.generateSourceImageStream());
         when(mockIsOps.get(clusterCmNamespace, connect.getName())).thenReturn(connect.generateTargetImageStream());
         when(mockBcOps.get(clusterCmNamespace, connect.getName())).thenReturn(connect.generateBuildConfig());
+        when(mockPdbOps.get(clusterCmNamespace, connect.getName())).thenReturn(connect.generatePodDisruptionBudget());
 
         when(mockServiceOps.reconcile(any(), any(), any())).thenReturn(Future.succeededFuture());
-
         when(mockDcOps.reconcile(any(), any(), any())).thenReturn(Future.succeededFuture());
 
         doAnswer(i -> Future.succeededFuture(scaleTo))
@@ -494,15 +546,14 @@ public class KafkaConnectS2IAssemblyOperatorTest {
 
         when(mockConnectOps.reconcile(anyString(), any(), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(null)));
         when(mockCmOps.reconcile(anyString(), any(), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(null)));
-
         when(mockIsOps.reconcile(any(), any(), any())).thenReturn(Future.succeededFuture());
-
         when(mockBcOps.reconcile(any(), any(), any())).thenReturn(Future.succeededFuture());
+        when(mockPdbOps.reconcile(any(), any(), any())).thenReturn(Future.succeededFuture());
 
         KafkaConnectS2IAssemblyOperator ops = new KafkaConnectS2IAssemblyOperator(vertx, true,
                 new MockCertManager(),
                 mockConnectOps,
-                mockCmOps, mockDcOps, mockServiceOps, mockIsOps, mockBcOps, mockSecretOps, networkPolicyOperator);
+                mockCmOps, mockDcOps, mockServiceOps, mockIsOps, mockBcOps, mockSecretOps, networkPolicyOperator, mockPdbOps, VERSIONS);
 
         Async async = context.async();
         ops.createOrUpdate(new Reconciliation("test-trigger", ResourceType.CONNECT_S2I, clusterCmNamespace, clusterCmName), clusterCm).setHandler(createResult -> {
@@ -526,12 +577,13 @@ public class KafkaConnectS2IAssemblyOperatorTest {
         ImageStreamOperator mockIsOps = mock(ImageStreamOperator.class);
         SecretOperator mockSecretOps = mock(SecretOperator.class);
         NetworkPolicyOperator networkPolicyOperator = mock(NetworkPolicyOperator.class);
+        PodDisruptionBudgetOperator mockPdbOps = mock(PodDisruptionBudgetOperator.class);
 
         String clusterCmName = "foo";
         String clusterCmNamespace = "test";
 
         KafkaConnectS2I clusterCm = ResourceUtils.createEmptyKafkaConnectS2ICluster(clusterCmNamespace, clusterCmName);
-        KafkaConnectS2ICluster connect = KafkaConnectS2ICluster.fromCrd(clusterCm);
+        KafkaConnectS2ICluster connect = KafkaConnectS2ICluster.fromCrd(clusterCm, VERSIONS);
         clusterCm.getSpec().setReplicas(scaleTo); // Change replicas to create ScaleDown
 
         when(mockConnectOps.get(clusterCmNamespace, clusterCmName)).thenReturn(clusterCm);
@@ -540,6 +592,7 @@ public class KafkaConnectS2IAssemblyOperatorTest {
         when(mockIsOps.get(clusterCmNamespace, connect.getSourceImageStreamName())).thenReturn(connect.generateSourceImageStream());
         when(mockIsOps.get(clusterCmNamespace, connect.getName())).thenReturn(connect.generateTargetImageStream());
         when(mockBcOps.get(clusterCmNamespace, connect.getName())).thenReturn(connect.generateBuildConfig());
+        when(mockPdbOps.get(clusterCmNamespace, connect.getName())).thenReturn(connect.generatePodDisruptionBudget());
 
         when(mockServiceOps.reconcile(any(), any(), any())).thenReturn(Future.succeededFuture());
 
@@ -553,15 +606,14 @@ public class KafkaConnectS2IAssemblyOperatorTest {
 
         when(mockConnectOps.reconcile(anyString(), any(), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(null)));
         when(mockCmOps.reconcile(anyString(), any(), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(null)));
-
         when(mockIsOps.reconcile(any(), any(), any())).thenReturn(Future.succeededFuture());
-
         when(mockBcOps.reconcile(any(), any(), any())).thenReturn(Future.succeededFuture());
+        when(mockPdbOps.reconcile(any(), any(), any())).thenReturn(Future.succeededFuture());
 
         KafkaConnectS2IAssemblyOperator ops = new KafkaConnectS2IAssemblyOperator(vertx, true,
                 new MockCertManager(),
                 mockConnectOps,
-                mockCmOps, mockDcOps, mockServiceOps, mockIsOps, mockBcOps, mockSecretOps, networkPolicyOperator);
+                mockCmOps, mockDcOps, mockServiceOps, mockIsOps, mockBcOps, mockSecretOps, networkPolicyOperator, mockPdbOps, VERSIONS);
 
         Async async = context.async();
         ops.createOrUpdate(new Reconciliation("test-trigger", ResourceType.CONNECT_S2I, clusterCmNamespace, clusterCmName), clusterCm).setHandler(createResult -> {
@@ -584,7 +636,7 @@ public class KafkaConnectS2IAssemblyOperatorTest {
         ImageStreamOperator mockIsOps = mock(ImageStreamOperator.class);
         SecretOperator mockSecretOps = mock(SecretOperator.class);
         NetworkPolicyOperator networkPolicyOperator = mock(NetworkPolicyOperator.class);
-
+        PodDisruptionBudgetOperator mockPdbOps = mock(PodDisruptionBudgetOperator.class);
 
         String clusterCmNamespace = "test";
 
@@ -598,24 +650,23 @@ public class KafkaConnectS2IAssemblyOperatorTest {
         // providing the list of ALL DeploymentConfigs for all the Kafka Connect S2I clusters
         Labels newLabels = Labels.forKind(KafkaConnectS2I.RESOURCE_KIND);
         when(mockDcOps.list(eq(clusterCmNamespace), eq(newLabels))).thenReturn(
-                asList(KafkaConnectS2ICluster.fromCrd(bar).generateDeploymentConfig(new HashMap<String, String>(), true)));
+                asList(KafkaConnectS2ICluster.fromCrd(bar, VERSIONS).generateDeploymentConfig(new HashMap<String, String>(), true)));
 
         // providing the list DeploymentConfigs for already "existing" Kafka Connect S2I clusters
         Labels barLabels = Labels.forCluster("bar");
         when(mockDcOps.list(eq(clusterCmNamespace), eq(barLabels))).thenReturn(
-                asList(KafkaConnectS2ICluster.fromCrd(bar).generateDeploymentConfig(new HashMap<String, String>(), true))
+                asList(KafkaConnectS2ICluster.fromCrd(bar, VERSIONS).generateDeploymentConfig(new HashMap<String, String>(), true))
         );
 
         when(mockSecretOps.reconcile(eq(clusterCmNamespace), any(), any())).thenReturn(Future.succeededFuture());
 
         Set<String> createdOrUpdated = new CopyOnWriteArraySet<>();
-        Set<String> deleted = new CopyOnWriteArraySet<>();
 
         Async async = context.async(2);
         KafkaConnectS2IAssemblyOperator ops = new KafkaConnectS2IAssemblyOperator(vertx, true,
                 new MockCertManager(),
                 mockConnectOps,
-                mockCmOps, mockDcOps, mockServiceOps, mockIsOps, mockBcOps, mockSecretOps, networkPolicyOperator) {
+                mockCmOps, mockDcOps, mockServiceOps, mockIsOps, mockBcOps, mockSecretOps, networkPolicyOperator, mockPdbOps, VERSIONS) {
 
             @Override
             public Future<Void> createOrUpdate(Reconciliation reconciliation, KafkaConnectS2I kafkaConnectS2IAssembly) {

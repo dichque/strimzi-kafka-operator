@@ -20,7 +20,7 @@ oc create -f additional-scrape-configs.yml
 
 * Create burrow side car
 ```bash
-oc apply -f ../../burrow/burrow-deployment.yml
+oc apply -f ./burrow/burrow-deployment.yml
 service "burrow" created
 configmap "burrow-config" created
 deployment "burrow" created

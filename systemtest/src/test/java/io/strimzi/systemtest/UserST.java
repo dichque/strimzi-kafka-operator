@@ -10,6 +10,8 @@ import io.strimzi.test.Namespace;
 import io.strimzi.test.StrimziExtension;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -48,7 +50,7 @@ class UserST extends AbstractST {
                 .endKafka()
             .endSpec().build()).done();
 
-        KafkaUser user = resources().tlsUser(kafkaUser).done();
+        KafkaUser user = resources().tlsUser(CLUSTER_NAME, kafkaUser).done();
         kubeClient.waitForResourceCreation("secret", kafkaUser);
 
         String kafkaUserSecret = kubeClient.getResourceAsJson("secret", kafkaUser);
@@ -86,5 +88,16 @@ class UserST extends AbstractST {
 
         kubeClient.deleteByName("KafkaUser", kafkaUser);
         kubeClient.waitForResourceDeletion("KafkaUser", kafkaUser);
+    }
+
+    @BeforeEach
+    void createTestResources() {
+        createResources();
+    }
+
+    @AfterEach
+    void deleteTestResources() throws Exception {
+        deleteResources();
+        waitForDeletion(TEARDOWN_GLOBAL_WAIT, NAMESPACE);
     }
 }

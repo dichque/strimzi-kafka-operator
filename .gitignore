@@ -18,6 +18,7 @@ release.properties
 
 # VS Code
 .factorypath
+.vscode
 
 # Velocity.log
 velocity.log
@@ -33,3 +34,9 @@ helm-charts/strimzi-kafka-operator-*.*.*.tgz
 # Connect plugin (tests)
 systemtest/*.tar.gz
 systemtest/my-plugins/
+
+# MacOS Desktop Services Store files
+**/.DS_Store
+
+# Hacking directory with different script utilities and more complex YAML examples used by developers for development and testing
+/hacking/

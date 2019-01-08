@@ -12,6 +12,7 @@ import io.strimzi.api.kafka.KafkaConnectAssemblyList;
 import io.strimzi.api.kafka.model.KafkaConnect;
 import io.strimzi.api.kafka.model.KafkaConnectBuilder;
 import io.strimzi.operator.cluster.model.KafkaConnectCluster;
+import io.strimzi.operator.cluster.model.KafkaVersion;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.operator.common.model.ResourceType;
@@ -20,6 +21,7 @@ import io.strimzi.operator.common.operator.resource.ConfigMapOperator;
 import io.strimzi.operator.common.operator.resource.CrdOperator;
 import io.strimzi.operator.common.operator.resource.DeploymentOperator;
 import io.strimzi.operator.common.operator.resource.NetworkPolicyOperator;
+import io.strimzi.operator.common.operator.resource.PodDisruptionBudgetOperator;
 import io.strimzi.operator.common.operator.resource.SecretOperator;
 import io.strimzi.operator.common.operator.resource.ServiceOperator;
 import io.strimzi.test.TestUtils;
@@ -34,12 +36,20 @@ import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import java.io.StringReader;
 import java.util.Collections;
+
+import static java.util.Collections.emptyMap;
+import static java.util.Collections.singletonMap;
 
 @RunWith(VertxUnitRunner.class)
 public class KafkaConnectAssemblyOperatorMockTest {
 
     private static final Logger LOGGER = LogManager.getLogger(KafkaConnectAssemblyOperatorMockTest.class);
+
+    private static final KafkaVersion.Lookup VERSIONS = new KafkaVersion.Lookup(new StringReader(
+            "2.0.0 default 2.0 2.0 1234567890abcdef"),
+            emptyMap(), singletonMap("2.0.0", "strimzi/kafka-connect:latest-kafka-2.0.0"), emptyMap(), emptyMap()) { };
 
     private static final String NAMESPACE = "my-namespace";
     private static final String CLUSTER_NAME = "my-connect-cluster";
@@ -83,10 +93,11 @@ public class KafkaConnectAssemblyOperatorMockTest {
         DeploymentOperator depops = new DeploymentOperator(vertx, mockClient);
         SecretOperator secretops = new SecretOperator(vertx, mockClient);
         NetworkPolicyOperator policyops = new NetworkPolicyOperator(vertx, mockClient);
+        PodDisruptionBudgetOperator pdbops = new PodDisruptionBudgetOperator(vertx, mockClient);
         KafkaConnectAssemblyOperator kco = new KafkaConnectAssemblyOperator(vertx, true,
                 new MockCertManager(),
                 connectOperator,
-                cmops, depops, svcops, secretops, policyops);
+                cmops, depops, svcops, secretops, policyops, pdbops, VERSIONS);
 
         LOGGER.info("Reconciling initially -> create");
         Async createAsync = context.async();
@@ -96,6 +107,7 @@ public class KafkaConnectAssemblyOperatorMockTest {
             context.assertNotNull(mockClient.extensions().deployments().inNamespace(NAMESPACE).withName(KafkaConnectCluster.kafkaConnectClusterName(CLUSTER_NAME)).get());
             context.assertNotNull(mockClient.configMaps().inNamespace(NAMESPACE).withName(KafkaConnectCluster.logAndMetricsConfigName(CLUSTER_NAME)).get());
             context.assertNotNull(mockClient.services().inNamespace(NAMESPACE).withName(KafkaConnectCluster.serviceName(CLUSTER_NAME)).get());
+            context.assertNotNull(mockClient.policy().podDisruptionBudget().inNamespace(NAMESPACE).withName(KafkaConnectCluster.kafkaConnectClusterName(CLUSTER_NAME)).get());
             createAsync.complete();
         });
         createAsync.await();

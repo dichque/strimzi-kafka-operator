@@ -136,10 +136,12 @@ public class TopicOperatorIT {
         kafkaCluster.startup();
 
         kubeClient = new DefaultKubernetesClient().inNamespace(NAMESPACE);
+        Crds.registerCustomKinds();
         LOGGER.info("Using namespace {}", NAMESPACE);
         Map<String, String> m = new HashMap();
         m.put(Config.KAFKA_BOOTSTRAP_SERVERS.key, kafkaCluster.brokerList());
         m.put(Config.ZOOKEEPER_CONNECT.key, "localhost:" + zkPort(kafkaCluster));
+        m.put(Config.ZOOKEEPER_CONNECTION_TIMEOUT_MS.key, "30000");
         m.put(Config.NAMESPACE.key, NAMESPACE);
         session = new Session(kubeClient, new Config(m));
 
@@ -153,6 +155,7 @@ public class TopicOperatorIT {
                 topicsWatcher = session.topicsWatcher;
                 async.complete();
             } else {
+                ar.cause().printStackTrace();
                 context.fail("Failed to deploy session");
             }
         });
@@ -188,7 +191,9 @@ public class TopicOperatorIT {
     public void teardown(TestContext context) {
         LOGGER.info("Tearing down test");
 
-        operation().inNamespace(NAMESPACE).delete();
+        if (kubeClient != null) {
+            operation().inNamespace(NAMESPACE).delete();
+        }
 
         Async async = context.async();
         if (deploymentId != null) {

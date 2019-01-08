@@ -28,6 +28,14 @@ spec:
           annotations:
             key1: label1
             key2: label2
+        imagePullSecrets:
+          - name: some-secret
+          - name: some-other-secret
+        securityContext:
+          runAsUser: 1000001
+          runAsGroup: 1000001
+          fsGroup: 0
+        terminationGracePeriodSeconds: 30
       bootstrapService:
         metadata:
           labels:
@@ -76,6 +84,15 @@ spec:
           annotations:
             key1: label1
             key2: label2
+      podDisruptionBudget:
+        metadata:
+          labels:
+            key1: label1
+            key2: label2
+          annotations:
+            key1: label1
+            key2: label2
+        maxUnavailable: 1
   zookeeper:
     replicas: 3
     storage:

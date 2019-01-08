@@ -5,6 +5,7 @@
 package io.strimzi.systemtest;
 
 import io.fabric8.kubernetes.api.model.Event;
+import io.strimzi.api.kafka.Crds;
 import io.strimzi.api.kafka.model.KafkaResources;
 import io.strimzi.test.ClusterOperator;
 import io.strimzi.test.Namespace;
@@ -13,7 +14,9 @@ import io.strimzi.test.TestUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -32,14 +35,14 @@ import static io.strimzi.systemtest.k8s.Events.Started;
 import static io.strimzi.systemtest.k8s.Events.Unhealthy;
 import static io.strimzi.systemtest.matchers.Matchers.hasAllOfReasons;
 import static io.strimzi.systemtest.matchers.Matchers.hasNoneOfReasons;
+import static io.strimzi.test.StrimziExtension.ACCEPTANCE;
+import static io.strimzi.test.StrimziExtension.REGRESSION;
 import static io.strimzi.test.TestUtils.getFileAsString;
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasItem;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.hamcrest.MatcherAssert.assertThat;
 import static org.valid4j.matchers.jsonpath.JsonPathMatchers.hasJsonPath;
-import static io.strimzi.test.StrimziExtension.REGRESSION;
-import static io.strimzi.test.StrimziExtension.ACCEPTANCE;
 
 @ExtendWith(StrimziExtension.class)
 @Namespace(ConnectST.NAMESPACE)
@@ -233,14 +236,28 @@ class ConnectST extends AbstractST {
         LOGGER.info("Verifying docker image names");
         //Verifying docker image for cluster-operator
 
-        Map<String, String> imgFromDeplConf = getImagesFromConfig(kubeClient.getResourceAsJson(
-                "deployment", "strimzi-cluster-operator"));
+        Map<String, String> imgFromDeplConf = getImagesFromConfig();
         //Verifying docker image for kafka connect
         String connectImageName = getContainerImageNameFromPod(kubeClient.listResourcesByLabel("pod",
                 "strimzi.io/kind=KafkaConnect").get(0));
 
-        assertEquals(imgFromDeplConf.get(CONNECT_IMAGE), connectImageName);
+        String connectVersion = Crds.kafkaConnectOperation(client).inNamespace(NAMESPACE).withName(KAFKA_CLUSTER_NAME).get().getSpec().getVersion();
+        if (connectVersion == null) {
+            connectVersion = "2.0.0";
+        }
+
+        assertEquals(TestUtils.parseImageMap(imgFromDeplConf.get(KAFKA_CONNECT_IMAGE_MAP)).get(connectVersion), connectImageName);
         LOGGER.info("Docker images verified");
+    }
+
+    @BeforeEach
+    void createTestResources() {
+        createResources();
+    }
+
+    @AfterEach
+    void deleteTestResources() throws Exception {
+        deleteResources();
     }
 
     @BeforeAll

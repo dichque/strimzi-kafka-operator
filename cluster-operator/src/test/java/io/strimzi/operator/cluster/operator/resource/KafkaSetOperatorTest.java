@@ -5,13 +5,13 @@
 package io.strimzi.operator.cluster.operator.resource;
 
 import io.fabric8.kubernetes.api.model.EnvVar;
-import io.fabric8.kubernetes.api.model.extensions.StatefulSet;
+import io.fabric8.kubernetes.api.model.apps.StatefulSet;
 import io.strimzi.api.kafka.model.InlineLogging;
 import io.strimzi.api.kafka.model.Kafka;
 import io.strimzi.api.kafka.model.KafkaBuilder;
 import io.strimzi.operator.cluster.ResourceUtils;
 import io.strimzi.operator.cluster.model.KafkaCluster;
-import io.strimzi.operator.common.operator.MockCertManager;
+import io.strimzi.operator.cluster.model.KafkaVersion;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -20,6 +20,7 @@ import java.util.Map;
 
 import static io.strimzi.operator.cluster.model.AbstractModel.containerEnvVars;
 import static io.strimzi.operator.cluster.model.KafkaCluster.ENV_VAR_KAFKA_ZOOKEEPER_CONNECT;
+import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonMap;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -39,9 +40,9 @@ public class KafkaSetOperatorTest {
 
     @Before
     public void before() {
-        MockCertManager certManager = new MockCertManager();
-        a = KafkaCluster.fromCrd(getResource()).generateStatefulSet(true);
-        b = KafkaCluster.fromCrd(getResource()).generateStatefulSet(true);
+        KafkaVersion.Lookup versions = new KafkaVersion.Lookup(emptyMap(), emptyMap(), emptyMap(), emptyMap());
+        a = KafkaCluster.fromCrd(getResource(), versions).generateStatefulSet(true);
+        b = KafkaCluster.fromCrd(getResource(), versions).generateStatefulSet(true);
     }
 
     private Kafka getResource() {

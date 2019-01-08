@@ -11,6 +11,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 import io.fabric8.kubernetes.api.model.Affinity;
 import io.fabric8.kubernetes.api.model.Toleration;
+import io.strimzi.api.kafka.model.connect.ExternalConfiguration;
 import io.strimzi.api.kafka.model.template.KafkaConnectTemplate;
 import io.strimzi.crdgenerator.annotations.Description;
 import io.strimzi.crdgenerator.annotations.KubeLink;
@@ -34,15 +35,14 @@ public class KafkaConnectSpec implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    public static final String DEFAULT_IMAGE =
-            System.getenv().getOrDefault("STRIMZI_DEFAULT_KAFKA_CONNECT_IMAGE", "strimzi/kafka-connect:latest");
-
     public static final String FORBIDDEN_PREFIXES = "ssl., sasl., security., listeners, plugin.path, rest., bootstrap.servers";
 
     private Map<String, Object> config = new HashMap<>(0);
 
     private Logging logging;
     private int replicas;
+
+    private String version;
     private String image;
     private Resources resources;
     private Probe livenessProbe;
@@ -55,6 +55,8 @@ public class KafkaConnectSpec implements Serializable {
     private KafkaConnectTls tls;
     private KafkaConnectAuthentication authentication;
     private KafkaConnectTemplate template;
+    private ExternalConfiguration externalConfiguration;
+
     private Map<String, Object> additionalProperties = new HashMap<>(0);
 
     @Description("The number of pods in the Kafka Connect group.")
@@ -84,6 +86,16 @@ public class KafkaConnectSpec implements Serializable {
 
     public void setReplicas(int replicas) {
         this.replicas = replicas;
+    }
+
+    @Description("The Kafka Connect version. Defaults to {DefaultKafkaVersion}. " +
+            "Consult the user documentation to understand the process required to upgrade or downgrade the version.")
+    public String getVersion() {
+        return version;
+    }
+
+    public void setVersion(String version) {
+        this.version = version;
     }
 
     @Description("The docker image for the pods.")
@@ -208,6 +220,16 @@ public class KafkaConnectSpec implements Serializable {
 
     public void setTemplate(KafkaConnectTemplate template) {
         this.template = template;
+    }
+
+    @Description("Pass data from Secrets or ConfigMaps to the Kafka Connect pods and use them to configure connectors.")
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    public ExternalConfiguration getExternalConfiguration() {
+        return externalConfiguration;
+    }
+
+    public void setExternalConfiguration(ExternalConfiguration externalConfiguration) {
+        this.externalConfiguration = externalConfiguration;
     }
 
     @JsonAnyGetter

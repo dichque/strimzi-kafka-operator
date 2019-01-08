@@ -5,7 +5,7 @@
     <parent>
         <artifactId>strimzi</artifactId>
         <groupId>io.strimzi</groupId>
-        <version>0.9.0-SNAPSHOT</version>
+        <version>0.10.0-SNAPSHOT</version>
     </parent>
     <modelVersion>4.0.0</modelVersion>
     <artifactId>systemtest</artifactId>
@@ -107,13 +107,19 @@
             <artifactId>gson</artifactId>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-clients</artifactId>
+            <version>${kafka.version}</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
         <plugins>
             <plugin>
                 <artifactId>maven-failsafe-plugin</artifactId>
-                <version>2.22.0</version>
+                <version>${maven.failsafe.version}</version>
                 <executions>
                     <execution>
                         <goals>
@@ -135,7 +141,7 @@
                     <dependency>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-failsafe-plugin</artifactId>
-                        <version>2.22.0</version>
+                        <version>${maven.failsafe.version}</version>
                     </dependency>
                 </dependencies>
             </plugin>

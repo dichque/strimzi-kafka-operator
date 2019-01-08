@@ -11,9 +11,10 @@ import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.api.model.Service;
 import io.fabric8.kubernetes.api.model.ServiceBuilder;
 import io.fabric8.kubernetes.api.model.ServicePortBuilder;
-import io.fabric8.kubernetes.api.model.extensions.Deployment;
-import io.fabric8.kubernetes.api.model.extensions.NetworkPolicy;
-import io.fabric8.kubernetes.api.model.extensions.StatefulSet;
+import io.fabric8.kubernetes.api.model.apps.Deployment;
+import io.fabric8.kubernetes.api.model.networking.NetworkPolicy;
+import io.fabric8.kubernetes.api.model.apps.StatefulSet;
+import io.fabric8.kubernetes.api.model.policy.PodDisruptionBudget;
 import io.fabric8.openshift.api.model.Route;
 import io.fabric8.openshift.api.model.RouteBuilder;
 import io.strimzi.api.kafka.model.EntityOperatorSpec;
@@ -30,6 +31,7 @@ import io.strimzi.api.kafka.model.PersistentClaimStorageBuilder;
 import io.strimzi.api.kafka.model.Storage;
 import io.strimzi.api.kafka.model.TopicOperatorSpec;
 import io.strimzi.api.kafka.model.TopicOperatorSpecBuilder;
+import io.strimzi.operator.cluster.ClusterOperator;
 import io.strimzi.operator.cluster.ClusterOperatorConfig;
 import io.strimzi.operator.cluster.ResourceUtils;
 import io.strimzi.operator.cluster.model.AbstractModel;
@@ -37,6 +39,7 @@ import io.strimzi.operator.cluster.model.ClientsCa;
 import io.strimzi.operator.cluster.model.ClusterCa;
 import io.strimzi.operator.cluster.model.EntityOperator;
 import io.strimzi.operator.cluster.model.KafkaCluster;
+import io.strimzi.operator.cluster.model.KafkaVersion;
 import io.strimzi.operator.cluster.model.ModelUtils;
 import io.strimzi.operator.cluster.model.TopicOperator;
 import io.strimzi.operator.cluster.model.ZookeeperCluster;
@@ -53,6 +56,7 @@ import io.strimzi.operator.common.operator.resource.ConfigMapOperator;
 import io.strimzi.operator.common.operator.resource.CrdOperator;
 import io.strimzi.operator.common.operator.resource.DeploymentOperator;
 import io.strimzi.operator.common.operator.resource.NetworkPolicyOperator;
+import io.strimzi.operator.common.operator.resource.PodDisruptionBudgetOperator;
 import io.strimzi.operator.common.operator.resource.PvcOperator;
 import io.strimzi.operator.common.operator.resource.ReconcileResult;
 import io.strimzi.operator.common.operator.resource.RoleBindingOperator;
@@ -74,12 +78,14 @@ import org.junit.runners.Parameterized;
 import org.mockito.ArgumentCaptor;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import static io.strimzi.test.TestUtils.set;
@@ -88,7 +94,6 @@ import static java.util.Collections.emptyList;
 import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonMap;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -96,6 +101,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
@@ -108,6 +114,8 @@ public class KafkaAssemblyOperatorTest {
     public static final InlineLogging LOG_KAFKA_CONFIG = new InlineLogging();
     public static final InlineLogging LOG_ZOOKEEPER_CONFIG = new InlineLogging();
     public static final InlineLogging LOG_CONNECT_CONFIG = new InlineLogging();
+    private static final KafkaVersion.Lookup VERSIONS = new KafkaVersion.Lookup(emptyMap(), emptyMap(), emptyMap(), emptyMap());
+
     static {
         LOG_KAFKA_CONFIG.setLoggers(singletonMap("kafka.root.logger.level", "INFO"));
         LOG_ZOOKEEPER_CONFIG.setLoggers(singletonMap("zookeeper.root.logger", "INFO"));
@@ -281,8 +289,8 @@ public class KafkaAssemblyOperatorTest {
         ClusterCa clusterCa = new ClusterCa(new MockCertManager(), clusterCm.getMetadata().getName(),
                 ModelUtils.findSecretWithName(secrets, AbstractModel.clusterCaCertSecretName(clusterCm.getMetadata().getName())),
                 ModelUtils.findSecretWithName(secrets, AbstractModel.clusterCaKeySecretName(clusterCm.getMetadata().getName())));
-        KafkaCluster kafkaCluster = KafkaCluster.fromCrd(clusterCm);
-        ZookeeperCluster zookeeperCluster = ZookeeperCluster.fromCrd(clusterCm);
+        KafkaCluster kafkaCluster = KafkaCluster.fromCrd(clusterCm, VERSIONS);
+        ZookeeperCluster zookeeperCluster = ZookeeperCluster.fromCrd(clusterCm, VERSIONS);
         TopicOperator topicOperator = TopicOperator.fromCrd(clusterCm);
         EntityOperator entityOperator = EntityOperator.fromCrd(clusterCm);
 
@@ -297,6 +305,7 @@ public class KafkaAssemblyOperatorTest {
         DeploymentOperator mockDepOps = supplier.deploymentOperations;
         SecretOperator mockSecretOps = supplier.secretOperations;
         NetworkPolicyOperator mockPolicyOps = supplier.networkPolicyOperator;
+        PodDisruptionBudgetOperator mockPdbOps = supplier.podDisruptionBudgetOperator;
         RouteOperator mockRotueOps = supplier.routeOperations;
 
         // Create a CM
@@ -305,18 +314,21 @@ public class KafkaAssemblyOperatorTest {
         when(mockKafkaOps.get(clusterCmNamespace, clusterCmName)).thenReturn(null);
         ArgumentCaptor<Service> serviceCaptor = ArgumentCaptor.forClass(Service.class);
         ArgumentCaptor<NetworkPolicy> policyCaptor = ArgumentCaptor.forClass(NetworkPolicy.class);
+        ArgumentCaptor<PodDisruptionBudget> pdbCaptor = ArgumentCaptor.forClass(PodDisruptionBudget.class);
         when(mockServiceOps.reconcile(anyString(), anyString(), serviceCaptor.capture())).thenReturn(Future.succeededFuture(ReconcileResult.created(null)));
         when(mockServiceOps.endpointReadiness(anyString(), any(), anyLong(), anyLong())).thenReturn(Future.succeededFuture());
         ArgumentCaptor<StatefulSet> ssCaptor = ArgumentCaptor.forClass(StatefulSet.class);
         when(mockZsOps.reconcile(anyString(), anyString(), ssCaptor.capture())).thenReturn(Future.succeededFuture(ReconcileResult.created(null)));
         when(mockZsOps.scaleDown(anyString(), anyString(), anyInt())).thenReturn(Future.succeededFuture(null));
-        when(mockZsOps.maybeRollingUpdate(any(), anyBoolean())).thenReturn(Future.succeededFuture());
+        when(mockZsOps.maybeRollingUpdate(any(), any(Predicate.class))).thenReturn(Future.succeededFuture());
         when(mockZsOps.scaleUp(anyString(), anyString(), anyInt())).thenReturn(Future.succeededFuture(42));
         when(mockKsOps.reconcile(anyString(), anyString(), ssCaptor.capture())).thenReturn(Future.succeededFuture(ReconcileResult.created(null)));
         when(mockKsOps.scaleDown(anyString(), anyString(), anyInt())).thenReturn(Future.succeededFuture(null));
-        when(mockKsOps.maybeRollingUpdate(any(), anyBoolean())).thenReturn(Future.succeededFuture());
+        when(mockKsOps.maybeRollingUpdate(any(), any(Predicate.class))).thenReturn(Future.succeededFuture());
         when(mockKsOps.scaleUp(anyString(), anyString(), anyInt())).thenReturn(Future.succeededFuture(42));
         when(mockPolicyOps.reconcile(anyString(), anyString(), policyCaptor.capture())).thenReturn(Future.succeededFuture(ReconcileResult.created(null)));
+        when(mockZsOps.getAsync(anyString(), anyString())).thenReturn(Future.succeededFuture());
+        when(mockPdbOps.reconcile(anyString(), anyString(), pdbCaptor.capture())).thenReturn(Future.succeededFuture(ReconcileResult.created(null)));
 
         Set<String> expectedSecrets = set(
                 KafkaCluster.clientsCaKeySecretName(clusterCmName),
@@ -324,7 +336,8 @@ public class KafkaAssemblyOperatorTest {
                 KafkaCluster.clusterCaCertSecretName(clusterCmName),
                 KafkaCluster.clusterCaKeySecretName(clusterCmName),
                 KafkaCluster.brokersSecretName(clusterCmName),
-                ZookeeperCluster.nodesSecretName(clusterCmName));
+                ZookeeperCluster.nodesSecretName(clusterCmName),
+                ClusterOperator.secretName(clusterCmName));
         expectedSecrets.addAll(secrets.stream().map(s -> s.getMetadata().getName()).collect(Collectors.toSet()));
         if (toConfig != null) {
             // it's expected only when the Topic Operator is deployed by the Cluster Operator
@@ -376,7 +389,18 @@ public class KafkaAssemblyOperatorTest {
         KafkaAssemblyOperator ops = new KafkaAssemblyOperator(vertx, openShift,
                 ClusterOperatorConfig.DEFAULT_OPERATION_TIMEOUT_MS,
                 certManager,
-                supplier);
+                supplier,
+                VERSIONS) {
+            @Override
+            public ReconciliationState createReconciliationState(Reconciliation r, Kafka ka) {
+                return new ReconciliationState(r, ka) {
+                    @Override
+                    public Future<StatefulSet> waitForQuiescence(String namespace, String statefulSetName) {
+                        return Future.succeededFuture(null);
+                    }
+                };
+            }
+        };
 
         // Now try to create a KafkaCluster based on this CM
         Async async = context.async();
@@ -417,6 +441,11 @@ public class KafkaAssemblyOperatorTest {
 
             // expected Secrets with certificates
             context.assertEquals(new TreeSet(expectedSecrets), new TreeSet(createdOrUpdatedSecrets));
+
+            // Check PDBs
+            context.assertEquals(2, pdbCaptor.getAllValues().size());
+            context.assertEquals(set(KafkaCluster.kafkaClusterName(clusterCmName), ZookeeperCluster.zookeeperClusterName(clusterCmName)),
+                    pdbCaptor.getAllValues().stream().map(ss -> ss.getMetadata().getName()).collect(Collectors.toSet()));
 
             // Verify deleted routes
             if (openShift) {
@@ -578,10 +607,10 @@ public class KafkaAssemblyOperatorTest {
     }
 
     private void updateCluster(TestContext context, Kafka originalAssembly, Kafka updatedAssembly) {
-        KafkaCluster originalKafkaCluster = KafkaCluster.fromCrd(originalAssembly);
-        KafkaCluster updatedKafkaCluster = KafkaCluster.fromCrd(updatedAssembly);
-        ZookeeperCluster originalZookeeperCluster = ZookeeperCluster.fromCrd(originalAssembly);
-        ZookeeperCluster updatedZookeeperCluster = ZookeeperCluster.fromCrd(updatedAssembly);
+        KafkaCluster originalKafkaCluster = KafkaCluster.fromCrd(originalAssembly, VERSIONS);
+        KafkaCluster updatedKafkaCluster = KafkaCluster.fromCrd(updatedAssembly, VERSIONS);
+        ZookeeperCluster originalZookeeperCluster = ZookeeperCluster.fromCrd(originalAssembly, VERSIONS);
+        ZookeeperCluster updatedZookeeperCluster = ZookeeperCluster.fromCrd(updatedAssembly, VERSIONS);
         TopicOperator originalTopicOperator = TopicOperator.fromCrd(originalAssembly);
         EntityOperator originalEntityOperator = EntityOperator.fromCrd(originalAssembly);
 
@@ -596,6 +625,7 @@ public class KafkaAssemblyOperatorTest {
         DeploymentOperator mockDepOps = supplier.deploymentOperations;
         SecretOperator mockSecretOps = supplier.secretOperations;
         NetworkPolicyOperator mockPolicyOps = supplier.networkPolicyOperator;
+        PodDisruptionBudgetOperator mockPdbOps = supplier.podDisruptionBudgetOperator;
         ServiceAccountOperator mockSao = supplier.serviceAccountOperator;
         RoleBindingOperator mockRbo = supplier.roleBindingOperator;
         ClusterRoleBindingOperator mockCrbo = supplier.clusterRoleBindingOperator;
@@ -667,6 +697,10 @@ public class KafkaAssemblyOperatorTest {
         when(mockPolicyOps.get(clusterNamespace, KafkaCluster.policyName(clusterName))).thenReturn(originalKafkaCluster.generateNetworkPolicy());
         when(mockPolicyOps.get(clusterNamespace, ZookeeperCluster.policyName(clusterName))).thenReturn(originalZookeeperCluster.generateNetworkPolicy());
 
+        // Mock PodDisruptionBudget get
+        when(mockPdbOps.get(clusterNamespace, KafkaCluster.kafkaClusterName(clusterName))).thenReturn(originalKafkaCluster.generatePodDisruptionBudget());
+        when(mockPdbOps.get(clusterNamespace, ZookeeperCluster.zookeeperClusterName(clusterName))).thenReturn(originalZookeeperCluster.generatePodDisruptionBudget());
+
         // Mock StatefulSet get
         when(mockKsOps.get(clusterNamespace, KafkaCluster.kafkaClusterName(clusterName))).thenReturn(
                 originalKafkaCluster.generateStatefulSet(openShift)
@@ -682,7 +716,7 @@ public class KafkaAssemblyOperatorTest {
         }
         if (originalEntityOperator != null) {
             when(mockDepOps.get(clusterNamespace, EntityOperator.entityOperatorName(clusterName))).thenReturn(
-                    originalEntityOperator.generateDeployment(true)
+                    originalEntityOperator.generateDeployment(true, Collections.EMPTY_MAP)
             );
         }
 
@@ -705,8 +739,11 @@ public class KafkaAssemblyOperatorTest {
         // Mock Secrets patch
         when(mockSecretOps.reconcile(eq(clusterNamespace), any(), any())).thenReturn(Future.succeededFuture());
 
-        // Mock Secrets patch
+        // Mock NetworkPolicy patch
         when(mockPolicyOps.reconcile(eq(clusterNamespace), any(), any())).thenReturn(Future.succeededFuture());
+
+        // Mock PodDisruptionBudget patch
+        when(mockPdbOps.reconcile(eq(clusterNamespace), any(), any())).thenReturn(Future.succeededFuture());
 
         // Mock StatefulSet patch
         when(mockZsOps.reconcile(anyString(), anyString(), any())).thenAnswer(invocation -> {
@@ -717,8 +754,10 @@ public class KafkaAssemblyOperatorTest {
             StatefulSet ss = invocation.getArgument(2);
             return Future.succeededFuture(ReconcileResult.patched(ss));
         });
-        when(mockZsOps.maybeRollingUpdate(any(), anyBoolean())).thenReturn(Future.succeededFuture());
-        when(mockKsOps.maybeRollingUpdate(any(), anyBoolean())).thenReturn(Future.succeededFuture());
+        when(mockZsOps.maybeRollingUpdate(any(), any(Predicate.class))).thenReturn(Future.succeededFuture());
+        when(mockKsOps.maybeRollingUpdate(any(), any(Predicate.class))).thenReturn(Future.succeededFuture());
+
+        when(mockZsOps.getAsync(anyString(), anyString())).thenReturn(Future.succeededFuture());
 
         // Mock StatefulSet scaleUp
         ArgumentCaptor<String> scaledUpCaptor = ArgumentCaptor.forClass(String.class);
@@ -747,14 +786,28 @@ public class KafkaAssemblyOperatorTest {
         KafkaAssemblyOperator ops = new KafkaAssemblyOperator(vertx, openShift,
                 ClusterOperatorConfig.DEFAULT_OPERATION_TIMEOUT_MS,
                 certManager,
-                supplier);
+                supplier,
+                VERSIONS) {
+            @Override
+            public ReconciliationState createReconciliationState(Reconciliation r, Kafka ka) {
+                return new ReconciliationState(r, ka) {
+                    @Override
+                    public Future<StatefulSet> waitForQuiescence(String namespace, String statefulSetName) {
+                        return Future.succeededFuture(originalKafkaCluster.generateStatefulSet(openShift));
+                    }
+                };
+            }
+        };
 
         // Now try to update a KafkaCluster based on this CM
         Async async = context.async();
-        ops.createOrUpdate(new Reconciliation("test-trigger", ResourceType.KAFKA, clusterNamespace, clusterName), updatedAssembly).setHandler(createResult -> {
+        ops.createOrUpdate(new Reconciliation("test-trigger", ResourceType.KAFKA, clusterNamespace, clusterName) {
+
+        }, updatedAssembly).setHandler(createResult -> {
             if (createResult.failed()) createResult.cause().printStackTrace();
             context.assertTrue(createResult.succeeded());
 
+            int steps = updatedAssembly.getSpec().getZookeeper().getReplicas();
             // rolling restart
             Set<String> expectedRollingRestarts = set();
             if (KafkaSetOperator.needsRollingUpdate(
@@ -769,6 +822,7 @@ public class KafkaAssemblyOperatorTest {
             }
 
             // No metrics config  => no CMs created
+            verify(mockZsOps, times(1)).scaleUp(anyString(), scaledUpCaptor.capture(), anyInt());
             verify(mockCmOps, never()).createOrUpdate(any());
             verifyNoMoreInteractions(mockPvcOps);
             async.complete();
@@ -819,7 +873,7 @@ public class KafkaAssemblyOperatorTest {
         // providing the list of ALL StatefulSets for all the Kafka clusters
         Labels newLabels = Labels.forKind(Kafka.RESOURCE_KIND);
         when(mockKsOps.list(eq(clusterCmNamespace), eq(newLabels))).thenReturn(
-                asList(KafkaCluster.fromCrd(bar).generateStatefulSet(openShift))
+                asList(KafkaCluster.fromCrd(bar, VERSIONS).generateStatefulSet(openShift))
         );
 
         when(mockSecretOps.get(eq(clusterCmNamespace), eq(AbstractModel.clusterCaCertSecretName(foo.getMetadata().getName()))))
@@ -829,7 +883,7 @@ public class KafkaAssemblyOperatorTest {
 
         // providing the list StatefulSets for already "existing" Kafka clusters
         Labels barLabels = Labels.forCluster("bar");
-        KafkaCluster barCluster = KafkaCluster.fromCrd(bar);
+        KafkaCluster barCluster = KafkaCluster.fromCrd(bar, VERSIONS);
         when(mockKsOps.list(eq(clusterCmNamespace), eq(barLabels))).thenReturn(
                 asList(barCluster.generateStatefulSet(openShift))
         );
@@ -849,7 +903,8 @@ public class KafkaAssemblyOperatorTest {
         KafkaAssemblyOperator ops = new KafkaAssemblyOperator(vertx, openShift,
                 ClusterOperatorConfig.DEFAULT_OPERATION_TIMEOUT_MS,
                 certManager,
-                supplier) {
+                supplier,
+                VERSIONS) {
             @Override
             public Future<Void> createOrUpdate(Reconciliation reconciliation, Kafka kafkaAssembly) {
                 createdOrUpdated.add(kafkaAssembly.getMetadata().getName());
@@ -874,7 +929,7 @@ public class KafkaAssemblyOperatorTest {
                 mock(KafkaSetOperator.class), mock(ConfigMapOperator.class), mock(SecretOperator.class),
                 mock(PvcOperator.class), mock(DeploymentOperator.class),
                 mock(ServiceAccountOperator.class), mock(RoleBindingOperator.class), mock(ClusterRoleBindingOperator.class),
-                mock(NetworkPolicyOperator.class), mock(CrdOperator.class));
+                mock(NetworkPolicyOperator.class), mock(PodDisruptionBudgetOperator.class), mock(CrdOperator.class));
         when(supplier.serviceAccountOperator.reconcile(anyString(), anyString(), any())).thenReturn(Future.succeededFuture());
         when(supplier.roleBindingOperator.reconcile(anyString(), anyString(), any())).thenReturn(Future.succeededFuture());
         when(supplier.clusterRoleBindingOperator.reconcile(anyString(), any())).thenReturn(Future.succeededFuture());
@@ -884,9 +939,11 @@ public class KafkaAssemblyOperatorTest {
             when(supplier.routeOperations.hasAddress(anyString(), anyString(), anyLong(), anyLong())).thenReturn(Future.succeededFuture());
             when(supplier.routeOperations.get(anyString(), anyString())).thenAnswer(i -> {
                 return new RouteBuilder()
-                        .withNewSpec()
+                        .withNewStatus()
+                        .addNewIngress()
                         .withHost(i.getArgument(0) + "." + i.getArgument(1) + ".mydomain.com")
-                        .endSpec()
+                        .endIngress()
+                        .endStatus()
                         .build();
             });
         }

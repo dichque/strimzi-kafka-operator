@@ -16,8 +16,6 @@ echo "KAFKA_LOG_DIRS=$KAFKA_LOG_DIRS"
 
 # Disable Kafka's GC logging (which logs to a file)...
 export GC_LOG_ENABLED="false"
-# ... but enable equivalent GC logging to stdout
-export KAFKA_GC_LOG_OPTS="-verbose:gc -XX:+PrintGCDetails -XX:+PrintGCDateStamps -XX:+PrintGCTimeStamps"
 
 if [ -z "$KAFKA_LOG4J_OPTS" ]; then
   export KAFKA_LOG4J_OPTS="-Dlog4j.configuration=file:$KAFKA_HOME/custom-config/log4j.properties"
@@ -60,6 +58,9 @@ if [ -z "$KAFKA_HEAP_OPTS" -a -n "${DYNAMIC_HEAP_FRACTION}" ]; then
       export KAFKA_HEAP_OPTS="-Xms${CALC_MAX_HEAP} -Xmx${CALC_MAX_HEAP}"
     fi
 fi
+
+# exporting the GC options env var recognized by the Kafka scripts
+export KAFKA_GC_LOG_OPTS=$STRIMZI_KAFKA_GC_LOG_OPTS
 
 # starting Kafka server with final configuration
 exec $KAFKA_HOME/bin/kafka-server-start.sh /tmp/strimzi.properties

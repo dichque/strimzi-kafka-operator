@@ -1,4 +1,6 @@
-# Strimzi: Kafka as a Service
+[![Strimzi](./documentation/logo/strimzi.png)](http://strimzi.io/)
+
+# Run Apache Kafka on Kubernetes and OpenShift
 
 [![Build Status](https://travis-ci.org/strimzi/strimzi-kafka-operator.svg?branch=master)](https://travis-ci.org/strimzi/strimzi-kafka-operator)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](http://www.apache.org/licenses/LICENSE-2.0)
@@ -7,6 +9,10 @@
 Strimzi provides a way to run an [Apache Kafka][kafka] cluster on 
 [Kubernetes][k8s] or [OpenShift][os] in various deployment configurations.
 See our [website][strimzi] for more details about the project.
+
+## Quickstart
+
+To get up and running quickly, check our Quickstart guides for [OKD (OpenShift Origin)](http://strimzi.io/quickstarts/okd/) and [Minikube](http://strimzi.io/quickstarts/minikube/). 
 
 ## Documentation
 

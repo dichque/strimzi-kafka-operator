@@ -30,7 +30,8 @@ public class KafkaMirrorMakerTemplate implements Serializable {
     private static final long serialVersionUID = 1L;
 
     private ResourceTemplate deployment;
-    private ResourceTemplate pod;
+    private PodTemplate pod;
+    private PodDisruptionBudgetTemplate podDisruptionBudget;
     private Map<String, Object> additionalProperties = new HashMap<>(0);
 
     @Description("Template for Kafka Mirror Maker `Deployment`.")
@@ -45,12 +46,22 @@ public class KafkaMirrorMakerTemplate implements Serializable {
 
     @Description("Template for Kafka Mirror Maker `Pods`.")
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
-    public ResourceTemplate getPod() {
+    public PodTemplate getPod() {
         return pod;
     }
 
-    public void setPod(ResourceTemplate pod) {
+    public void setPod(PodTemplate pod) {
         this.pod = pod;
+    }
+
+    @Description("Template for Kafka Mirror Maker `PodDisruptionBudget`.")
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    public PodDisruptionBudgetTemplate getPodDisruptionBudget() {
+        return podDisruptionBudget;
+    }
+
+    public void setPodDisruptionBudget(PodDisruptionBudgetTemplate podDisruptionBudget) {
+        this.podDisruptionBudget = podDisruptionBudget;
     }
 
     @JsonAnyGetter

@@ -18,11 +18,13 @@ import io.fabric8.kubernetes.client.dsl.Resource;
 import io.fabric8.zjsonpatch.JsonDiff;
 import io.strimzi.certs.CertManager;
 import io.strimzi.operator.cluster.InvalidConfigParameterException;
+import io.strimzi.operator.cluster.model.InvalidResourceException;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.operator.common.model.ResourceType;
 import io.strimzi.operator.common.operator.resource.AbstractWatchableResourceOperator;
 import io.strimzi.operator.common.operator.resource.NetworkPolicyOperator;
+import io.strimzi.operator.common.operator.resource.PodDisruptionBudgetOperator;
 import io.strimzi.operator.common.operator.resource.SecretOperator;
 import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
@@ -64,6 +66,7 @@ public abstract class AbstractAssemblyOperator<C extends KubernetesClient, T ext
     protected final SecretOperator secretOperations;
     protected final CertManager certManager;
     protected final NetworkPolicyOperator networkPolicyOperator;
+    protected final PodDisruptionBudgetOperator podDisruptionBudgetOperator;
     private final String kind;
 
     /**
@@ -76,7 +79,8 @@ public abstract class AbstractAssemblyOperator<C extends KubernetesClient, T ext
                                        CertManager certManager,
                                        AbstractWatchableResourceOperator<C, T, L, D, R> resourceOperator,
                                        SecretOperator secretOperations,
-                                       NetworkPolicyOperator networkPolicyOperator) {
+                                       NetworkPolicyOperator networkPolicyOperator,
+                                       PodDisruptionBudgetOperator podDisruptionBudgetOperator) {
         this.vertx = vertx;
         this.isOpenShift = isOpenShift;
         this.assemblyType = assemblyType;
@@ -85,6 +89,7 @@ public abstract class AbstractAssemblyOperator<C extends KubernetesClient, T ext
         this.certManager = certManager;
         this.secretOperations = secretOperations;
         this.networkPolicyOperator = networkPolicyOperator;
+        this.podDisruptionBudgetOperator = podDisruptionBudgetOperator;
     }
 
     /**
@@ -155,7 +160,7 @@ public abstract class AbstractAssemblyOperator<C extends KubernetesClient, T ext
                                 lock.release();
                                 log.debug("{}: Lock {} released", reconciliation, lockName);
                                 if (createResult.failed()) {
-                                    if (createResult.cause() instanceof InvalidConfigParameterException) {
+                                    if (createResult.cause() instanceof InvalidResourceException) {
                                         log.error(createResult.cause().getMessage());
                                     } else {
                                         log.error("{}: createOrUpdate failed", reconciliation, createResult.cause());

@@ -10,16 +10,17 @@ import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.openshift.client.OpenShiftClient;
 import io.strimzi.api.kafka.Crds;
+import io.strimzi.api.kafka.KafkaConnectAssemblyList;
+import io.strimzi.api.kafka.KafkaConnectS2IAssemblyList;
 import io.strimzi.api.kafka.KafkaMirrorMakerList;
 import io.strimzi.api.kafka.model.DoneableKafkaConnect;
 import io.strimzi.api.kafka.model.DoneableKafkaConnectS2I;
-import io.strimzi.api.kafka.KafkaConnectAssemblyList;
-import io.strimzi.api.kafka.KafkaConnectS2IAssemblyList;
 import io.strimzi.api.kafka.model.DoneableKafkaMirrorMaker;
 import io.strimzi.api.kafka.model.KafkaConnect;
 import io.strimzi.api.kafka.model.KafkaConnectS2I;
 import io.strimzi.api.kafka.model.KafkaMirrorMaker;
 import io.strimzi.certs.OpenSslCertManager;
+import io.strimzi.operator.cluster.model.KafkaVersion;
 import io.strimzi.operator.cluster.operator.assembly.KafkaAssemblyOperator;
 import io.strimzi.operator.cluster.operator.assembly.KafkaConnectAssemblyOperator;
 import io.strimzi.operator.cluster.operator.assembly.KafkaConnectS2IAssemblyOperator;
@@ -33,9 +34,9 @@ import io.strimzi.operator.common.operator.resource.DeploymentConfigOperator;
 import io.strimzi.operator.common.operator.resource.DeploymentOperator;
 import io.strimzi.operator.common.operator.resource.ImageStreamOperator;
 import io.strimzi.operator.common.operator.resource.NetworkPolicyOperator;
+import io.strimzi.operator.common.operator.resource.PodDisruptionBudgetOperator;
 import io.strimzi.operator.common.operator.resource.SecretOperator;
 import io.strimzi.operator.common.operator.resource.ServiceOperator;
-
 import io.vertx.core.CompositeFuture;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
@@ -105,22 +106,25 @@ public class Main {
         CrdOperator<KubernetesClient, KafkaMirrorMaker, KafkaMirrorMakerList, DoneableKafkaMirrorMaker> kmmo =
                 new CrdOperator<>(vertx, client, KafkaMirrorMaker.class, KafkaMirrorMakerList.class, DoneableKafkaMirrorMaker.class);
         NetworkPolicyOperator networkPolicyOperator = new NetworkPolicyOperator(vertx, client);
+        PodDisruptionBudgetOperator podDisruptionBudgetOperator = new PodDisruptionBudgetOperator(vertx, client);
 
         OpenSslCertManager certManager = new OpenSslCertManager();
         KafkaAssemblyOperator kafkaClusterOperations = new KafkaAssemblyOperator(vertx, isOpenShift,
-                config.getOperationTimeoutMs(), certManager, new ResourceOperatorSupplier(vertx, client, isOpenShift, config.getOperationTimeoutMs()));
-        KafkaConnectAssemblyOperator kafkaConnectClusterOperations = new KafkaConnectAssemblyOperator(vertx, isOpenShift, certManager, kco, configMapOperations, deploymentOperations, serviceOperations, secretOperations, networkPolicyOperator);
+                config.getOperationTimeoutMs(), certManager,
+                new ResourceOperatorSupplier(vertx, client, isOpenShift, config.getOperationTimeoutMs()),
+                config.versions());
+        KafkaConnectAssemblyOperator kafkaConnectClusterOperations = new KafkaConnectAssemblyOperator(vertx, isOpenShift, certManager, kco, configMapOperations, deploymentOperations, serviceOperations, secretOperations, networkPolicyOperator,
+                podDisruptionBudgetOperator, config.versions());
 
         KafkaConnectS2IAssemblyOperator kafkaConnectS2IClusterOperations = null;
-        CrdOperator<OpenShiftClient, KafkaConnectS2I, KafkaConnectS2IAssemblyList, DoneableKafkaConnectS2I> kafkaConnectS2iCrdOperator = null;
         if (isOpenShift) {
-            kafkaConnectS2IClusterOperations = createS2iOperator(vertx, client, isOpenShift, serviceOperations, configMapOperations, secretOperations, certManager);
+            kafkaConnectS2IClusterOperations = createS2iOperator(vertx, client, isOpenShift, serviceOperations, configMapOperations, secretOperations, certManager, config.versions());
         } else {
             maybeLogS2iOnKubeWarning(vertx, client);
         }
 
         KafkaMirrorMakerAssemblyOperator kafkaMirrorMakerAssemblyOperator =
-                new KafkaMirrorMakerAssemblyOperator(vertx, isOpenShift, certManager, kmmo, secretOperations, configMapOperations, networkPolicyOperator, deploymentOperations, serviceOperations);
+                new KafkaMirrorMakerAssemblyOperator(vertx, isOpenShift, certManager, kmmo, secretOperations, configMapOperations, networkPolicyOperator, deploymentOperations, serviceOperations, podDisruptionBudgetOperator, config.versions());
 
         List<Future> futures = new ArrayList<>();
         for (String namespace : config.getNamespaces()) {
@@ -160,12 +164,13 @@ public class Main {
         }
     }
 
-    private static KafkaConnectS2IAssemblyOperator createS2iOperator(Vertx vertx, KubernetesClient client, boolean isOpenShift, ServiceOperator serviceOperations, ConfigMapOperator configMapOperations, SecretOperator secretOperations, OpenSslCertManager certManager) {
+    private static KafkaConnectS2IAssemblyOperator createS2iOperator(Vertx vertx, KubernetesClient client, boolean isOpenShift, ServiceOperator serviceOperations, ConfigMapOperator configMapOperations, SecretOperator secretOperations, OpenSslCertManager certManager, KafkaVersion.Lookup versions) {
         ImageStreamOperator imagesStreamOperations;
         BuildConfigOperator buildConfigOperations;
         DeploymentConfigOperator deploymentConfigOperations;
         CrdOperator<OpenShiftClient, KafkaConnectS2I, KafkaConnectS2IAssemblyList, DoneableKafkaConnectS2I> kafkaConnectS2iCrdOperator;
         NetworkPolicyOperator networkPolicyOperator;
+        PodDisruptionBudgetOperator podDisruptionBudgetOperator;
         KafkaConnectS2IAssemblyOperator kafkaConnectS2IClusterOperations;
         OpenShiftClient osClient = client.adapt(OpenShiftClient.class);
         imagesStreamOperations = new ImageStreamOperator(vertx, osClient);
@@ -173,11 +178,12 @@ public class Main {
         deploymentConfigOperations = new DeploymentConfigOperator(vertx, osClient);
         kafkaConnectS2iCrdOperator = new CrdOperator<>(vertx, osClient, KafkaConnectS2I.class, KafkaConnectS2IAssemblyList.class, DoneableKafkaConnectS2I.class);
         networkPolicyOperator = new NetworkPolicyOperator(vertx, client);
+        podDisruptionBudgetOperator = new PodDisruptionBudgetOperator(vertx, client);
         kafkaConnectS2IClusterOperations = new KafkaConnectS2IAssemblyOperator(vertx, isOpenShift,
                 certManager,
                 kafkaConnectS2iCrdOperator,
                  configMapOperations, deploymentConfigOperations,
-                serviceOperations, imagesStreamOperations, buildConfigOperations, secretOperations, networkPolicyOperator);
+                serviceOperations, imagesStreamOperations, buildConfigOperations, secretOperations, networkPolicyOperator, podDisruptionBudgetOperator, versions);
         return kafkaConnectS2IClusterOperations;
     }
 

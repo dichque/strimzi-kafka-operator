@@ -30,8 +30,9 @@ public class KafkaConnectTemplate implements Serializable {
     private static final long serialVersionUID = 1L;
 
     private ResourceTemplate deployment;
-    private ResourceTemplate pod;
+    private PodTemplate pod;
     private ResourceTemplate apiService;
+    private PodDisruptionBudgetTemplate podDisruptionBudget;
     private Map<String, Object> additionalProperties = new HashMap<>(0);
 
     @Description("Template for Kafka Connect `Deployment`.")
@@ -46,11 +47,11 @@ public class KafkaConnectTemplate implements Serializable {
 
     @Description("Template for Kafka Connect `Pods`.")
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
-    public ResourceTemplate getPod() {
+    public PodTemplate getPod() {
         return pod;
     }
 
-    public void setPod(ResourceTemplate pod) {
+    public void setPod(PodTemplate pod) {
         this.pod = pod;
     }
 
@@ -62,6 +63,16 @@ public class KafkaConnectTemplate implements Serializable {
 
     public void setApiService(ResourceTemplate apiService) {
         this.apiService = apiService;
+    }
+
+    @Description("Template for Kafka Connect `PodDisruptionBudget`.")
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    public PodDisruptionBudgetTemplate getPodDisruptionBudget() {
+        return podDisruptionBudget;
+    }
+
+    public void setPodDisruptionBudget(PodDisruptionBudgetTemplate podDisruptionBudget) {
+        this.podDisruptionBudget = podDisruptionBudget;
     }
 
     @JsonAnyGetter

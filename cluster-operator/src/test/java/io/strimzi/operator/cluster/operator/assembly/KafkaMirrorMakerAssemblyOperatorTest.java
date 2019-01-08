@@ -7,7 +7,8 @@ package io.strimzi.operator.cluster.operator.assembly;
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
 import io.fabric8.kubernetes.api.model.Service;
-import io.fabric8.kubernetes.api.model.extensions.Deployment;
+import io.fabric8.kubernetes.api.model.apps.Deployment;
+import io.fabric8.kubernetes.api.model.policy.PodDisruptionBudget;
 import io.strimzi.api.kafka.model.KafkaMirrorMaker;
 import io.strimzi.api.kafka.model.KafkaMirrorMakerConsumerSpec;
 import io.strimzi.api.kafka.model.KafkaMirrorMakerConsumerSpecBuilder;
@@ -16,6 +17,7 @@ import io.strimzi.api.kafka.model.KafkaMirrorMakerProducerSpecBuilder;
 import io.strimzi.operator.cluster.ResourceUtils;
 import io.strimzi.operator.cluster.model.AbstractModel;
 import io.strimzi.operator.cluster.model.KafkaMirrorMakerCluster;
+import io.strimzi.operator.cluster.model.KafkaVersion;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.operator.common.model.ResourceType;
@@ -24,6 +26,7 @@ import io.strimzi.operator.common.operator.resource.ConfigMapOperator;
 import io.strimzi.operator.common.operator.resource.CrdOperator;
 import io.strimzi.operator.common.operator.resource.DeploymentOperator;
 import io.strimzi.operator.common.operator.resource.NetworkPolicyOperator;
+import io.strimzi.operator.common.operator.resource.PodDisruptionBudgetOperator;
 import io.strimzi.operator.common.operator.resource.ReconcileResult;
 import io.strimzi.operator.common.operator.resource.SecretOperator;
 import io.strimzi.operator.common.operator.resource.ServiceOperator;
@@ -61,6 +64,7 @@ import static org.mockito.Mockito.when;
 @RunWith(VertxUnitRunner.class)
 public class KafkaMirrorMakerAssemblyOperatorTest {
 
+    private static final KafkaVersion.Lookup VERSIONS = new KafkaVersion.Lookup(Collections.emptyMap(), Collections.emptyMap(), Collections.emptyMap(), Collections.singletonMap("2.0.0", "strimzi/kafka-mirror-maker:latest-kafka-2.0.0"));
     protected static Vertx vertx;
     public static final String METRICS_CONFIG = "{\"foo\":\"bar\"}";
     public static final String LOGGING_CONFIG = "#Do not change this generated file. Logging can be configured in the corresponding kubernetes/openshift resource.\n" +
@@ -95,6 +99,7 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
         DeploymentOperator mockDcOps = mock(DeploymentOperator.class);
         SecretOperator mockSecretOps = mock(SecretOperator.class);
         NetworkPolicyOperator mockPolicyOps = mock(NetworkPolicyOperator.class);
+        PodDisruptionBudgetOperator mockPdbOps = mock(PodDisruptionBudgetOperator.class);
 
         String clusterCmName = "foo";
         String clusterCmNamespace = "test";
@@ -120,6 +125,9 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
         when(mockDcOps.scaleUp(anyString(), anyString(), anyInt())).thenReturn(Future.succeededFuture(42));
         when(mockDcOps.scaleDown(anyString(), anyString(), anyInt())).thenReturn(Future.succeededFuture(42));
 
+        ArgumentCaptor<PodDisruptionBudget> pdbCaptor = ArgumentCaptor.forClass(PodDisruptionBudget.class);
+        when(mockPdbOps.reconcile(anyString(), any(), pdbCaptor.capture())).thenReturn(Future.succeededFuture());
+
         when(mockCmOps.reconcile(anyString(), any(), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(null)));
         KafkaMirrorMakerAssemblyOperator ops = new KafkaMirrorMakerAssemblyOperator(vertx, true,
                 new MockCertManager(),
@@ -128,9 +136,12 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
                 mockCmOps,
                 mockPolicyOps,
                 mockDcOps,
-                mockServiceOps);
+                mockServiceOps,
+                mockPdbOps,
+                VERSIONS);
 
-        KafkaMirrorMakerCluster mirror = KafkaMirrorMakerCluster.fromCrd(clusterCm);
+        KafkaMirrorMakerCluster mirror = KafkaMirrorMakerCluster.fromCrd(clusterCm,
+                VERSIONS);
 
         Async async = context.async();
         ops.createOrUpdate(new Reconciliation("test-trigger", ResourceType.MIRRORMAKER, clusterCmNamespace, clusterCmName), clusterCm).setHandler(createResult -> {
@@ -158,6 +169,13 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
             annotations.put("strimzi.io/logging", LOGGING_CONFIG);
             context.assertEquals(mirror.generateDeployment(annotations, true), dc, "Deployments are not equal");
 
+            // Verify PodDisruptionBudget
+            List<PodDisruptionBudget> capturedPdb = pdbCaptor.getAllValues();
+            context.assertEquals(1, capturedPdb.size());
+            PodDisruptionBudget pdb = capturedPdb.get(0);
+            context.assertEquals(mirror.getName(), pdb.getMetadata().getName());
+            context.assertEquals(mirror.generatePodDisruptionBudget(), pdb, "PodDisruptionBudgets are not equal");
+
             async.complete();
         });
     }
@@ -170,6 +188,7 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
         DeploymentOperator mockDcOps = mock(DeploymentOperator.class);
         SecretOperator mockSecretOps = mock(SecretOperator.class);
         NetworkPolicyOperator mockPolicyOps = mock(NetworkPolicyOperator.class);
+        PodDisruptionBudgetOperator mockPdbOps = mock(PodDisruptionBudgetOperator.class);
 
         String clusterCmName = "foo";
         String clusterCmNamespace = "test";
@@ -186,7 +205,8 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
         metricsCm.put("foo", "bar");
         KafkaMirrorMaker clusterCm = ResourceUtils.createKafkaMirrorMakerCluster(clusterCmNamespace, clusterCmName, image, producer, consumer, whitelist, metricsCm);
 
-        KafkaMirrorMakerCluster mirror = KafkaMirrorMakerCluster.fromCrd(clusterCm);
+        KafkaMirrorMakerCluster mirror = KafkaMirrorMakerCluster.fromCrd(clusterCm,
+                VERSIONS);
         when(mockMirrorOps.get(clusterCmNamespace, clusterCmName)).thenReturn(clusterCm);
         when(mockServiceOps.get(clusterCmNamespace, mirror.getName())).thenReturn(mirror.generateService());
         when(mockDcOps.get(clusterCmNamespace, mirror.getName())).thenReturn(mirror.generateDeployment(new HashMap<String, String>(), true));
@@ -207,6 +227,9 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
         ArgumentCaptor<Integer> dcScaleDownReplicasCaptor = ArgumentCaptor.forClass(Integer.class);
         when(mockDcOps.scaleDown(eq(clusterCmNamespace), dcScaleDownNameCaptor.capture(), dcScaleDownReplicasCaptor.capture())).thenReturn(Future.succeededFuture());
 
+        ArgumentCaptor<PodDisruptionBudget> pdbCaptor = ArgumentCaptor.forClass(PodDisruptionBudget.class);
+        when(mockPdbOps.reconcile(anyString(), any(), pdbCaptor.capture())).thenReturn(Future.succeededFuture());
+
         when(mockCmOps.reconcile(anyString(), any(), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(null)));
 
         KafkaMirrorMakerAssemblyOperator ops = new KafkaMirrorMakerAssemblyOperator(vertx, true,
@@ -216,7 +239,9 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
                 mockCmOps,
                 mockPolicyOps,
                 mockDcOps,
-                mockServiceOps);
+                mockServiceOps,
+                mockPdbOps,
+                VERSIONS);
 
         Async async = context.async();
         ops.createOrUpdate(new Reconciliation("test-trigger", ResourceType.MIRRORMAKER, clusterCmNamespace, clusterCmName), clusterCm).setHandler(createResult -> {
@@ -229,6 +254,13 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
             // Verify Deployment Config
             List<Deployment> capturedDc = dcCaptor.getAllValues();
             context.assertEquals(1, capturedDc.size());
+
+            // Verify PodDisruptionBudget
+            List<PodDisruptionBudget> capturedPdb = pdbCaptor.getAllValues();
+            context.assertEquals(1, capturedPdb.size());
+            PodDisruptionBudget pdb = capturedPdb.get(0);
+            context.assertEquals(mirror.getName(), pdb.getMetadata().getName());
+            context.assertEquals(mirror.generatePodDisruptionBudget(), pdb, "PodDisruptionBudgets are not equal");
 
             // Verify scaleDown / scaleUp were not called
             context.assertEquals(1, dcScaleDownNameCaptor.getAllValues().size());
@@ -246,6 +278,7 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
         DeploymentOperator mockDcOps = mock(DeploymentOperator.class);
         SecretOperator mockSecretOps = mock(SecretOperator.class);
         NetworkPolicyOperator mockPolicyOps = mock(NetworkPolicyOperator.class);
+        PodDisruptionBudgetOperator mockPdbOps = mock(PodDisruptionBudgetOperator.class);
 
         String clusterCmName = "foo";
         String clusterCmNamespace = "test";
@@ -261,7 +294,8 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
         Map<String, Object> metricsCmP = new HashMap<>();
         metricsCmP.put("foo", "bar");
         KafkaMirrorMaker clusterCm = ResourceUtils.createKafkaMirrorMakerCluster(clusterCmNamespace, clusterCmName, image, producer, consumer, whitelist, metricsCmP);
-        KafkaMirrorMakerCluster mirror = KafkaMirrorMakerCluster.fromCrd(clusterCm);
+        KafkaMirrorMakerCluster mirror = KafkaMirrorMakerCluster.fromCrd(clusterCm,
+                VERSIONS);
         clusterCm.getSpec().setImage("some/different:image"); // Change the image to generate some diff
 
         when(mockMirrorOps.get(clusterCmNamespace, clusterCmName)).thenReturn(clusterCm);
@@ -283,6 +317,9 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
         ArgumentCaptor<String> dcScaleDownNameCaptor = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<Integer> dcScaleDownReplicasCaptor = ArgumentCaptor.forClass(Integer.class);
         when(mockDcOps.scaleDown(eq(clusterCmNamespace), dcScaleDownNameCaptor.capture(), dcScaleDownReplicasCaptor.capture())).thenReturn(Future.succeededFuture());
+
+        ArgumentCaptor<PodDisruptionBudget> pdbCaptor = ArgumentCaptor.forClass(PodDisruptionBudget.class);
+        when(mockPdbOps.reconcile(anyString(), any(), pdbCaptor.capture())).thenReturn(Future.succeededFuture());
 
         when(mockCmOps.reconcile(anyString(), any(), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(null)));
 
@@ -319,13 +356,16 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
                 mockCmOps,
                 mockPolicyOps,
                 mockDcOps,
-                mockServiceOps);
+                mockServiceOps,
+                mockPdbOps,
+                VERSIONS);
 
         Async async = context.async();
         ops.createOrUpdate(new Reconciliation("test-trigger", ResourceType.MIRRORMAKER, clusterCmNamespace, clusterCmName), clusterCm).setHandler(createResult -> {
             context.assertTrue(createResult.succeeded());
 
-            KafkaMirrorMakerCluster compareTo = KafkaMirrorMakerCluster.fromCrd(clusterCm);
+            KafkaMirrorMakerCluster compareTo = KafkaMirrorMakerCluster.fromCrd(clusterCm,
+                    VERSIONS);
 
             // Verify service
             List<Service> capturedServices = serviceCaptor.getAllValues();
@@ -342,6 +382,13 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
             Map<String, String> annotations = new HashMap();
             annotations.put("strimzi.io/logging", loggingCm.getData().get(compareTo.ANCILLARY_CM_KEY_LOG_CONFIG));
             context.assertEquals(compareTo.generateDeployment(annotations, true), dc, "Deployments are not equal");
+
+            // Verify PodDisruptionBudget
+            List<PodDisruptionBudget> capturedPdb = pdbCaptor.getAllValues();
+            context.assertEquals(1, capturedPdb.size());
+            PodDisruptionBudget pdb = capturedPdb.get(0);
+            context.assertEquals(compareTo.getName(), pdb.getMetadata().getName());
+            context.assertEquals(compareTo.generatePodDisruptionBudget(), pdb, "PodDisruptionBudgets are not equal");
 
             // Verify scaleDown / scaleUp were not called
             context.assertEquals(1, dcScaleDownNameCaptor.getAllValues().size());
@@ -361,6 +408,7 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
         DeploymentOperator mockDcOps = mock(DeploymentOperator.class);
         SecretOperator mockSecretOps = mock(SecretOperator.class);
         NetworkPolicyOperator mockPolicyOps = mock(NetworkPolicyOperator.class);
+        PodDisruptionBudgetOperator mockPdbOps = mock(PodDisruptionBudgetOperator.class);
 
         String clusterCmName = "foo";
         String clusterCmNamespace = "test";
@@ -376,7 +424,8 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
         Map<String, Object> metricsCm = new HashMap<>();
         metricsCm.put("foo", "bar");
         KafkaMirrorMaker clusterCm = ResourceUtils.createKafkaMirrorMakerCluster(clusterCmNamespace, clusterCmName, image, producer, consumer, whitelist, metricsCm);
-        KafkaMirrorMakerCluster mirror = KafkaMirrorMakerCluster.fromCrd(clusterCm);
+        KafkaMirrorMakerCluster mirror = KafkaMirrorMakerCluster.fromCrd(clusterCm,
+                VERSIONS);
         clusterCm.getSpec().setImage("some/different:image"); // Change the image to generate some diff
 
         when(mockMirrorOps.get(clusterCmNamespace, clusterCmName)).thenReturn(clusterCm);
@@ -403,6 +452,8 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
         ArgumentCaptor<Integer> dcScaleDownReplicasCaptor = ArgumentCaptor.forClass(Integer.class);
         when(mockDcOps.scaleDown(dcScaleDownNamespaceCaptor.capture(), dcScaleDownNameCaptor.capture(), dcScaleDownReplicasCaptor.capture())).thenReturn(Future.succeededFuture());
 
+        when(mockPdbOps.reconcile(anyString(), any(), any())).thenReturn(Future.succeededFuture());
+
         when(mockMirrorOps.reconcile(anyString(), any(), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(null)));
         when(mockCmOps.reconcile(anyString(), any(), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(null)));
 
@@ -413,7 +464,9 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
                 mockCmOps,
                 mockPolicyOps,
                 mockDcOps,
-                mockServiceOps);
+                mockServiceOps,
+                mockPdbOps,
+                VERSIONS);
 
         Async async = context.async();
         ops.createOrUpdate(new Reconciliation("test-trigger", ResourceType.MIRRORMAKER, clusterCmNamespace, clusterCmName), clusterCm).setHandler(createResult -> {
@@ -433,6 +486,7 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
         DeploymentOperator mockDcOps = mock(DeploymentOperator.class);
         SecretOperator mockSecretOps = mock(SecretOperator.class);
         NetworkPolicyOperator mockPolicyOps = mock(NetworkPolicyOperator.class);
+        PodDisruptionBudgetOperator mockPdbOps = mock(PodDisruptionBudgetOperator.class);
 
         String clusterCmName = "foo";
         String clusterCmNamespace = "test";
@@ -448,7 +502,8 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
         Map<String, Object> metricsCm = new HashMap<>();
         metricsCm.put("foo", "bar");
         KafkaMirrorMaker clusterCm = ResourceUtils.createKafkaMirrorMakerCluster(clusterCmNamespace, clusterCmName, image, producer, consumer, whitelist, metricsCm);
-        KafkaMirrorMakerCluster mirror = KafkaMirrorMakerCluster.fromCrd(clusterCm);
+        KafkaMirrorMakerCluster mirror = KafkaMirrorMakerCluster.fromCrd(clusterCm,
+                VERSIONS);
         clusterCm.getSpec().setReplicas(scaleTo); // Change replicas to create ScaleUp
 
         when(mockMirrorOps.get(clusterCmNamespace, clusterCmName)).thenReturn(clusterCm);
@@ -468,6 +523,8 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
         when(mockMirrorOps.reconcile(anyString(), any(), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(null)));
         when(mockCmOps.reconcile(anyString(), any(), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(null)));
 
+        when(mockPdbOps.reconcile(anyString(), any(), any())).thenReturn(Future.succeededFuture());
+
         KafkaMirrorMakerAssemblyOperator ops = new KafkaMirrorMakerAssemblyOperator(vertx, true,
                 new MockCertManager(),
                 mockMirrorOps,
@@ -475,7 +532,9 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
                 mockCmOps,
                 mockPolicyOps,
                 mockDcOps,
-                mockServiceOps);
+                mockServiceOps,
+                mockPdbOps,
+                VERSIONS);
 
         Async async = context.async();
         ops.createOrUpdate(new Reconciliation("test-trigger", ResourceType.MIRRORMAKER, clusterCmNamespace, clusterCmName), clusterCm).setHandler(createResult -> {
@@ -497,6 +556,7 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
         DeploymentOperator mockDcOps = mock(DeploymentOperator.class);
         SecretOperator mockSecretOps = mock(SecretOperator.class);
         NetworkPolicyOperator mockPolicyOps = mock(NetworkPolicyOperator.class);
+        PodDisruptionBudgetOperator mockPdbOps = mock(PodDisruptionBudgetOperator.class);
 
         String clusterCmName = "foo";
         String clusterCmNamespace = "test";
@@ -512,7 +572,8 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
         Map<String, Object> metricsCm = new HashMap<>();
         metricsCm.put("foo", "bar");
         KafkaMirrorMaker clusterCm = ResourceUtils.createKafkaMirrorMakerCluster(clusterCmNamespace, clusterCmName, image, producer, consumer, whitelist, metricsCm);
-        KafkaMirrorMakerCluster mirror = KafkaMirrorMakerCluster.fromCrd(clusterCm);
+        KafkaMirrorMakerCluster mirror = KafkaMirrorMakerCluster.fromCrd(clusterCm,
+                VERSIONS);
         clusterCm.getSpec().setReplicas(scaleTo); // Change replicas to create ScaleDown
 
         when(mockMirrorOps.get(clusterCmNamespace, clusterCmName)).thenReturn(clusterCm);
@@ -532,6 +593,8 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
         when(mockMirrorOps.reconcile(anyString(), any(), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(null)));
         when(mockCmOps.reconcile(anyString(), any(), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(null)));
 
+        when(mockPdbOps.reconcile(anyString(), any(), any())).thenReturn(Future.succeededFuture());
+
         KafkaMirrorMakerAssemblyOperator ops = new KafkaMirrorMakerAssemblyOperator(vertx, true,
                 new MockCertManager(),
                 mockMirrorOps,
@@ -539,7 +602,9 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
                 mockCmOps,
                 mockPolicyOps,
                 mockDcOps,
-                mockServiceOps);
+                mockServiceOps,
+                mockPdbOps,
+                VERSIONS);
 
         Async async = context.async();
         ops.createOrUpdate(new Reconciliation("test-trigger", ResourceType.MIRRORMAKER, clusterCmNamespace, clusterCmName), clusterCm).setHandler(createResult -> {
@@ -559,6 +624,7 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
         SecretOperator mockSecretOps = mock(SecretOperator.class);
         NetworkPolicyOperator mockPolicyOps = mock(NetworkPolicyOperator.class);
         ServiceOperator mockServiceOps = mock(ServiceOperator.class);
+        PodDisruptionBudgetOperator mockPdbOps = mock(PodDisruptionBudgetOperator.class);
 
         String clusterCmNamespace = "test";
 
@@ -585,18 +651,19 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
         // providing the list of ALL Deployments for all the Kafka Mirror Maker clusters
         Labels newLabels = Labels.forKind(KafkaMirrorMaker.RESOURCE_KIND);
         when(mockDcOps.list(eq(clusterCmNamespace), eq(newLabels))).thenReturn(
-                asList(KafkaMirrorMakerCluster.fromCrd(bar).generateDeployment(new HashMap<String, String>(), true)));
+                asList(KafkaMirrorMakerCluster.fromCrd(bar,
+                        VERSIONS).generateDeployment(new HashMap<String, String>(), true)));
 
         // providing the list Deployments for already "existing" Kafka Mirror Maker clusters
         Labels barLabels = Labels.forCluster("bar");
         when(mockDcOps.list(eq(clusterCmNamespace), eq(barLabels))).thenReturn(
-                asList(KafkaMirrorMakerCluster.fromCrd(bar).generateDeployment(new HashMap<String, String>(), true))
+                asList(KafkaMirrorMakerCluster.fromCrd(bar,
+                        VERSIONS).generateDeployment(new HashMap<String, String>(), true))
         );
 
         when(mockSecretOps.reconcile(eq(clusterCmNamespace), any(), any())).thenReturn(Future.succeededFuture());
 
         Set<String> createdOrUpdated = new CopyOnWriteArraySet<>();
-        Set<String> deleted = new CopyOnWriteArraySet<>();
 
         Async async = context.async(2);
 
@@ -607,7 +674,9 @@ public class KafkaMirrorMakerAssemblyOperatorTest {
                 mockCmOps,
                 mockPolicyOps,
                 mockDcOps,
-                mockServiceOps) {
+                mockServiceOps,
+                mockPdbOps,
+                VERSIONS) {
 
             @Override
             public Future<Void> createOrUpdate(Reconciliation reconciliation, KafkaMirrorMaker kafkaMirrorMakerAssembly) {
