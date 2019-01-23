@@ -73,7 +73,14 @@ spec:
     spec:
       containers:
       - name: burrow
-        image: dichque/burrow
+        image: containers.cisco.com/jaganaga/burrow:1.0
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
         ports:
         - name: api
           containerPort: 8000
@@ -89,7 +96,14 @@ spec:
         - name: config
           mountPath: /etc/burrow/config
       - name: burrow-exporter
-        image: solsson/burrow-exporter
+        image: containers.cisco.com/jaganaga/burrow-exporter:1.0
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"        
         ports:
         - name: metrics
           containerPort: 8080

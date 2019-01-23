@@ -126,11 +126,13 @@ objects:
     - ""
     resources:
     - services
+    - services/finalizers
     - endpoints
     verbs:
     - get
     - create
     - update
+    - delete
   - apiGroups:
     - ""
     resources:
@@ -169,9 +171,9 @@ objects:
           - --manage-crds=false
           - --namespaces=${NAMESPACE}
           - --logtostderr=true
-          - --config-reloader-image=quay.io/coreos/configmap-reload:v0.0.1
-          - --prometheus-config-reloader=quay.io/coreos/prometheus-config-reloader:v0.26.0
-          image: quay.io/coreos/prometheus-operator:v0.26.0
+          - --config-reloader-image=containers.cisco.com/jaganaga/configmap-reload:v0.0.1
+          - --prometheus-config-reloader=containers.cisco.com/jaganaga/prometheus-config-reloader:v0.26.0
+          image: containers.cisco.com/jaganaga/prometheus-operator:v0.26.0
           name: prometheus-operator
           ports:
           - containerPort: ${CONTAINER_PORT}
@@ -197,6 +199,7 @@ objects:
     name: prometheus
     namespace: ${NAMESPACE}
   spec:
+    image: containers.cisco.com/jaganaga/prometheus:v2.4.0
     securityContext: {}
     serviceAccountName: prometheus
     serviceMonitorSelector:
@@ -276,19 +279,6 @@ objects:
 # Cluster Roles to monitor K8s objects
 # This will be delegated to CAE admins
 - apiVersion: rbac.authorization.k8s.io/v1
-  kind: ClusterRoleBinding
-  metadata:
-    name: prometheus
-  roleRef:
-    apiGroup: rbac.authorization.k8s.io
-    kind: ClusterRole
-    name: prometheus
-  subjects:
-  - kind: ServiceAccount
-    name: prometheus
-    namespace: ${NAMESPACE}
-
-- apiVersion: rbac.authorization.k8s.io/v1
   kind: ClusterRole
   metadata:
     name: prometheus
@@ -317,3 +307,16 @@ objects:
     - '/metrics'
     verbs:
     - get
+
+- apiVersion: rbac.authorization.k8s.io/v1
+  kind: ClusterRoleBinding
+  metadata:
+    name: prometheus
+  roleRef:
+    apiGroup: rbac.authorization.k8s.io
+    kind: ClusterRole
+    name: prometheus
+  subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: ${NAMESPACE}
