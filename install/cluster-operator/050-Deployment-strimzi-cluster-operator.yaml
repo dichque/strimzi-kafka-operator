@@ -14,7 +14,7 @@ spec:
       serviceAccountName: strimzi-cluster-operator
       containers:
       - name: strimzi-cluster-operator
-        image: strimzi/cluster-operator:latest
+        image: containers.cisco.com/jaganaga/cluster-operator:0.9.0
         imagePullPolicy: IfNotPresent
         env:
         - name: STRIMZI_NAMESPACE
@@ -22,45 +22,47 @@ spec:
             fieldRef:
               fieldPath: metadata.namespace
         - name: STRIMZI_FULL_RECONCILIATION_INTERVAL_MS
-          value: "120000"
-        - name: STRIMZI_OPERATION_TIMEOUT_MS
           value: "300000"
+        - name: STRIMZI_OPERATION_TIMEOUT_MS
+          value: "600000"
         - name: STRIMZI_DEFAULT_ZOOKEEPER_IMAGE
-          value: strimzi/zookeeper:latest-kafka-2.0.0
+          value: containers.cisco.com/jaganaga/zookeeper:0.9.0-kafka-2.0.0
         - name: STRIMZI_KAFKA_IMAGES
           value: |
-            2.0.0=strimzi/kafka:latest-kafka-2.0.0
-            2.0.1=strimzi/kafka:latest-kafka-2.0.1
-            2.1.0=strimzi/kafka:latest-kafka-2.1.0
+            2.0.0=containers.cisco.com/jaganaga/kafka:0.9.0-kafka-2.0.0
+            2.0.1=containers.cisco.com/jaganaga/kafka:0.9.0-kafka-2.0.1
+            2.1.0=containers.cisco.com/jaganaga/kafka:0.9.0-kafka-2.1.0
         - name: STRIMZI_KAFKA_CONNECT_IMAGES
           value: |
-            2.0.0=strimzi/kafka-connect:latest-kafka-2.0.0
-            2.0.1=strimzi/kafka-connect:latest-kafka-2.0.1
-            2.1.0=strimzi/kafka-connect:latest-kafka-2.1.0
+            2.0.0=containers.cisco.com/jaganaga/kafka-connect:0.9.0-kafka-2.0.0
+            2.0.1=containers.cisco.com/jaganaga/kafka-connect:0.9.0-kafka-2.0.1
+            2.1.0=containers.cisco.com/jaganaga/kafka-connect:0.9.0-kafka-2.1.0
         - name: STRIMZI_KAFKA_CONNECT_S2I_IMAGES
           value: |
-            2.0.0=strimzi/kafka-connect-s2i:latest-kafka-2.0.0
-            2.0.1=strimzi/kafka-connect-s2i:latest-kafka-2.0.1
-            2.1.0=strimzi/kafka-connect-s2i:latest-kafka-2.1.0
+            2.0.0=containers.cisco.com/jaganaga/kafka-connect-s2i:0.9.0-kafka-2.0.0
+            2.0.1=containers.cisco.com/jaganaga/kafka-connect-s2i:0.9.0-kafka-2.0.1
+            2.1.0=containers.cisco.com/jaganaga/kafka-connect-s2i:0.9.0-kafka-2.1.0
         - name: STRIMZI_KAFKA_MIRROR_MAKER_IMAGES
           value: |
-            2.0.0=strimzi/kafka-mirror-maker:latest-kafka-2.0.0
-            2.0.1=strimzi/kafka-mirror-maker:latest-kafka-2.0.1
-            2.1.0=strimzi/kafka-mirror-maker:latest-kafka-2.1.0
+            2.0.0=containers.cisco.com/jaganaga/kafka-mirror-maker:0.9.0-kafka-2.0.0
+            2.0.1=containers.cisco.com/jaganaga/kafka-mirror-maker:0.9.0-kafka-2.0.1
+            2.1.0=containers.cisco.com/jaganaga/kafka-mirror-maker:0.9.0-kafka-2.1.0
         - name: STRIMZI_DEFAULT_TOPIC_OPERATOR_IMAGE
-          value: strimzi/topic-operator:latest
+          value: containers.cisco.com/jaganaga/topic-operator:0.9.0
         - name: STRIMZI_DEFAULT_USER_OPERATOR_IMAGE
-          value: strimzi/user-operator:latest
+          value: containers.cisco.com/jaganaga/user-operator:0.9.0
         - name: STRIMZI_DEFAULT_KAFKA_INIT_IMAGE
-          value: strimzi/kafka-init:latest
+          value: containers.cisco.com/jaganaga/kafka-init:0.9.0
         - name: STRIMZI_DEFAULT_TLS_SIDECAR_ZOOKEEPER_IMAGE
-          value: strimzi/zookeeper-stunnel:latest
+          value: containers.cisco.com/jaganaga/zookeeper-stunnel:0.9.0
         - name: STRIMZI_DEFAULT_TLS_SIDECAR_KAFKA_IMAGE
-          value: strimzi/kafka-stunnel:latest
+          value: containers.cisco.com/jaganaga/kafka-stunnel:0.9.0
         - name: STRIMZI_DEFAULT_TLS_SIDECAR_ENTITY_OPERATOR_IMAGE
-          value: strimzi/entity-operator-stunnel:latest
+          value: containers.cisco.com/jaganaga/entity-operator-stunnel:0.9.0
         - name: STRIMZI_LOG_LEVEL
           value: INFO
+        - name: STRIMZI_DEFAULT_KAFKA_IMAGE
+          value: containers.cisco.com/jaganaga/kafka:0.9.0-kafka-2.0.0
         livenessProbe:
           httpGet:
             path: /healthy
