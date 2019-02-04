@@ -199,7 +199,7 @@ objects:
     name: prometheus
     namespace: ${NAMESPACE}
   spec:
-    image: containers.cisco.com/jaganaga/prometheus:v2.4.0
+    baseImage: containers.cisco.com/jaganaga/prometheus
     securityContext: {}
     serviceAccountName: prometheus
     serviceMonitorSelector:
@@ -207,6 +207,10 @@ objects:
         team: ${KAFKA_SERVICE_TEAM}
     resources:
       requests:
+        memory: ${PROMETHEUS_MEMORY}
+        cpu: 400m
+      limits:
+        cpu: 400m
         memory: ${PROMETHEUS_MEMORY}
     additionalScrapeConfigs:
       name: additional-scrape-configs
