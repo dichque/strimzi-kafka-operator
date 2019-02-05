@@ -25,6 +25,8 @@ spec:
     jvmOptions:
       "-Xmx": "512M"
       "-Xms": "512M"
+    tlsSidecar:
+      image: containers.cisco.com/jaganaga/kafka-stunnel:0.9.0
     metrics:
       # Inspired by config from Kafka 2.0.0 example rules:
       # https://github.com/prometheus/jmx_exporter/blob/master/example_configs/kafka-2_0_0.yml
@@ -124,6 +126,7 @@ spec:
           quantile: "0.$4"
   zookeeper:
     replicas: 3
+    image: containers.cisco.com/jaganaga/zookeeper:0.9.0-kafka-2.0.1
     readinessProbe:
       initialDelaySeconds: 15
       timeoutSeconds: 5
@@ -140,6 +143,8 @@ spec:
     jvmOptions:
       "-Xmx": "512M"
       "-Xms": "512M"
+    tlsSidecar:
+      image: containers.cisco.com/jaganaga/zookeeper-stunnel:0.9.0
     metrics:
       # Inspired by Zookeeper rules
       # https://github.com/prometheus/jmx_exporter/blob/master/example_configs/zookeeper.yaml
