@@ -65,14 +65,20 @@ objects:
 # OpenShift resources
 #
 
+- apiVersion: v1
+  kind: ServiceAccount
+  metadata:
+    name: prometheus-operator
+    namespace: ${NAMESPACE}
+
 - apiVersion: rbac.authorization.k8s.io/v1
-  kind: RoleBinding
+  kind: ClusterRoleBinding
   metadata:
     name: prometheus-operator
     namespace: ${NAMESPACE}
   roleRef:
     apiGroup: rbac.authorization.k8s.io
-    kind: Role
+    kind: ClusterRole
     name: prometheus-operator
   subjects:
   - kind: ServiceAccount
@@ -80,7 +86,7 @@ objects:
     namespace: ${NAMESPACE}
 
 - apiVersion: rbac.authorization.k8s.io/v1
-  kind: Role
+  kind: ClusterRole
   metadata:
     name: prometheus-operator
     namespace: ${NAMESPACE}
@@ -169,7 +175,7 @@ objects:
         containers:
         - args:
           - --manage-crds=false
-          - --namespaces=${NAMESPACE}
+          # - --namespaces=${NAMESPACE}
           - --logtostderr=true
           - --config-reloader-image=containers.cisco.com/jaganaga/configmap-reload:v0.0.1
           - --prometheus-config-reloader=containers.cisco.com/jaganaga/prometheus-config-reloader:v0.26.0
@@ -186,141 +192,3 @@ objects:
               cpu: ${CPU_REQUEST}
               memory: ${MEMORY_REQUEST}
         serviceAccountName: prometheus-operator
-
-- apiVersion: v1
-  kind: ServiceAccount
-  metadata:
-    name: prometheus-operator
-    namespace: ${NAMESPACE}
-
-- apiVersion: monitoring.coreos.com/v1
-  kind: Prometheus
-  metadata:
-    name: prometheus
-    namespace: ${NAMESPACE}
-  spec:
-    baseImage: containers.cisco.com/jaganaga/prometheus
-    securityContext: {}
-    serviceAccountName: prometheus
-    serviceMonitorSelector:
-      matchLabels:
-        team: ${KAFKA_SERVICE_TEAM}
-    resources:
-      requests:
-        memory: ${PROMETHEUS_MEMORY}
-        cpu: 400m
-      limits:
-        cpu: 400m
-        memory: ${PROMETHEUS_MEMORY}
-    additionalScrapeConfigs:
-      name: additional-scrape-configs
-      key: prometheus-additional.yml
-
-- apiVersion: v1
-  kind: Service
-  metadata:
-    name: prometheus
-    namespace: ${NAMESPACE}
-  spec:
-    type: NodePort
-    ports:
-    - name: ${PORT_NAME}
-      port: ${PROMETHEUS_SERVICE_PORT}
-      protocol: TCP
-      targetPort: ${PORT_NAME}
-    selector:
-      prometheus: prometheus
-
-- apiVersion: v1
-  kind: ServiceAccount
-  metadata:
-    name: prometheus
-    namespace: ${NAMESPACE}
-
-- apiVersion: rbac.authorization.k8s.io/v1
-  kind: Role
-  metadata:
-    namespace: ${NAMESPACE}
-    name: prometheus
-  rules:
-  - apiGroups: [""]
-    resources:
-    - nodes
-    - nodes/proxy
-    - services
-    - endpoints
-    - pods
-    verbs: ["get", "list", "watch"]
-  - apiGroups: [""]
-    resources:
-    - configmaps
-    verbs: ["get"]
-
-- apiVersion: rbac.authorization.k8s.io/v1beta1
-  kind: RoleBinding
-  metadata:
-    name: prometheus
-    namespace: ${NAMESPACE}
-  roleRef:
-    apiGroup: rbac.authorization.k8s.io
-    kind: Role
-    name: prometheus
-  subjects:
-  - kind: ServiceAccount
-    name: prometheus
-    namespace: ${NAMESPACE}
-
-- apiVersion: v1
-  kind: Route
-  metadata:
-    name: prometheus
-    namespace: ${NAMESPACE}
-  spec:
-    to:
-      kind: Service
-      name: prometheus
-
-# Cluster Roles to monitor K8s objects
-# This will be delegated to CAE admins
-- apiVersion: rbac.authorization.k8s.io/v1
-  kind: ClusterRole
-  metadata:
-    name: prometheus
-  rules:
-  - apiGroups:
-    - ''
-    resources:
-    - nodes
-    - nodes/proxy
-    - services
-    - endpoints
-    - pods
-    verbs:
-    - get
-    - list
-    - watch
-  - apiGroups:
-    - extensions
-    resources:
-    - ingresses
-    verbs:
-    - get
-    - list
-    - watch
-  - nonResourceURLs:
-    - '/metrics'
-    verbs:
-    - get
-
-- apiVersion: rbac.authorization.k8s.io/v1
-  kind: ClusterRoleBinding
-  metadata:
-    name: prometheus
-  roleRef:
-    apiGroup: rbac.authorization.k8s.io
-    kind: ClusterRole
-    name: prometheus
-  subjects:
-  - kind: ServiceAccount
-    name: prometheus
-    namespace: ${NAMESPACE}
