@@ -21,22 +21,22 @@ parameters:
   description: Namespace in which the prometheus-operator is installed.
 - name: CPU_REQUEST
   displayName: CPU request
-  value: '100m'
+  value: '.1'
   required: true
   description: The amount of CPU to request for each container.
 - name: MEMORY_REQUEST
   displayName: Memory request
-  value: '100Mi'
+  value: '400Mi'
   required: true
   description: The amount of memory required for each container to run.
 - name: CPU_LIMIT
   displayName: CPU limit
-  value: '200m'
+  value: '.2'
   required: true
   description: The amount of CPU each container is limited to use.
 - name: MEMORY_LIMIT
   displayName: Memory limit
-  value: '200Mi'
+  value: '800Mi'
   required: true
   description: The amount of memory each container is limited to use.
 - name: CONTAINER_PORT
@@ -44,16 +44,6 @@ parameters:
   value: '8080'
   required: true
   description: The amount of memory each container is limited to use.
-- name: PROMETHEUS_MEMORY
-  displayName: Prometheus Memory Limit
-  value: '400Mi'
-- name: PROMETHEUS_SERVICE_PORT
-  displayName: Prometheus Service Port
-  value: '9090'
-- name: PORT_NAME
-  displayName: Port Name
-  value: 'metrics'
-  required: true
 - name: KAFKA_SERVICE_TEAM
   displayName: Kafka Service team label
   value: 'aims'

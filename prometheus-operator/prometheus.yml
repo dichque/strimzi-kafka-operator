@@ -26,7 +26,7 @@ parameters:
   description: The amount of CPU to request for each container.
 - name: MEMORY_REQUEST
   displayName: Memory request
-  value: '100Mi'
+  value: '400Mi'
   required: true
   description: The amount of memory required for each container to run.
 - name: CPU_LIMIT
@@ -46,7 +46,7 @@ parameters:
   description: The amount of memory each container is limited to use.
 - name: PROMETHEUS_MEMORY
   displayName: Prometheus Memory Limit
-  value: '400Mi'
+  value: '800Mi'
 - name: PROMETHEUS_SERVICE_PORT
   displayName: Prometheus Service Port
   value: '9090'
@@ -165,7 +165,7 @@ objects:
         team: ${KAFKA_SERVICE_TEAM}
     resources:
       requests:
-        memory: ${PROMETHEUS_MEMORY}
+        memory: ${MEMORY_REQUEST}
         cpu: ${CPU_REQUEST}
       limits:
         cpu: ${CPU_LIMIT}

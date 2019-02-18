@@ -23,3 +23,11 @@ rules:
   - get
   - list
   - watch
+- apiGroups:
+  - ""
+  resources:
+  - namespace
+  verbs:
+  - get
+  - list
+  - watch
