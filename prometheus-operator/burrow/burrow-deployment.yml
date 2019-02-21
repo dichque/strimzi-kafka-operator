@@ -77,10 +77,10 @@ spec:
         resources:
           requests:
             memory: "512Mi"
-            cpu: "200m"
+            cpu: ".02"
           limits:
-            memory: "512Mi"
-            cpu: "500m"
+            memory: "1024Mi"
+            cpu: ".05"
         ports:
         - name: api
           containerPort: 8000
@@ -103,7 +103,7 @@ spec:
             cpu: "200m"
           limits:
             memory: "512Mi"
-            cpu: "500m"        
+            cpu: "500m"
         ports:
         - name: metrics
           containerPort: 8080

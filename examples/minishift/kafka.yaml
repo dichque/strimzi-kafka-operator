@@ -17,14 +17,14 @@ spec:
       log.message.format.version: "2.0"
     storage:
       type: persistent-claim
-      size: 200Mi
+      size: 4Gi
       deleteClaim: false
-    resources:
-      requests:
-        memory: "1Gi"
-    jvmOptions:
-      "-Xmx": "512M"
-      "-Xms": "512M"
+    # resources:
+    #   requests:
+    #     memory: "5Gi"
+    # jvmOptions:
+    #   "-Xmx": "2G"
+    #   "-Xms": "2G"
     tlsSidecar: {}
       # image: containers.cisco.com/jaganaga/kafka-stunnel:0.9.0
     metrics:
@@ -135,14 +135,14 @@ spec:
       timeoutSeconds: 5
     storage:
       type: persistent-claim
-      size: 100Mi
+      size: 4Gi
       deleteClaim: false
     resources:
       requests:
-        memory: "1Gi"
+        memory: "5Gi"
     jvmOptions:
-      "-Xmx": "512M"
-      "-Xms": "512M"
+      "-Xmx": "2G"
+      "-Xms": "2G"
     tlsSidecar: {}
       # image: containers.cisco.com/jaganaga/zookeeper-stunnel:0.9.0
     metrics:

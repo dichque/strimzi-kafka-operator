@@ -21,17 +21,17 @@ parameters:
   description: Namespace in which the prometheus is installed.
 - name: CPU_REQUEST
   displayName: CPU request
-  value: '.1'
+  value: '.01'
   required: true
   description: The amount of CPU to request for each container.
 - name: MEMORY_REQUEST
   displayName: Memory request
-  value: '400Mi'
+  value: '1Gi'
   required: true
   description: The amount of memory required for each container to run.
 - name: CPU_LIMIT
   displayName: CPU limit
-  value: '0.2'
+  value: '.03'
   required: true
   description: The amount of CPU each container is limited to use.
 - name: MEMORY_LIMIT
@@ -46,7 +46,7 @@ parameters:
   description: The amount of memory each container is limited to use.
 - name: PROMETHEUS_MEMORY
   displayName: Prometheus Memory Limit
-  value: '800Mi'
+  value: '2Gi'
 - name: PROMETHEUS_SERVICE_PORT
   displayName: Prometheus Service Port
   value: '9090'
