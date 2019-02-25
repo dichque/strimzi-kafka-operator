@@ -12,4 +12,5 @@ oc process -f prometheus-operator/prometheus.yml -p NAMESPACE=kafka-1 -p KAFKA_S
 oc process -f prometheus-operator/kafka-servicemonitor.yml -p NAMESPACE=kafka-1 -p KAFKA_CLUSTER_NAME=my-cluster -p KAFKA_SERVICE_TEAM=aims -p ENDPOINT_PORT=metrics | oc create -f -
 
 oc apply -f prometheus-operator/burrow/burrow-deployment.yml
-oc apply -f metrics/examples/grafana/kubernetes.yaml
+oc apply -f metrics/examples/grafana/configmap.yaml
+oc apply -f metrics/examples/grafana/deploy.yaml

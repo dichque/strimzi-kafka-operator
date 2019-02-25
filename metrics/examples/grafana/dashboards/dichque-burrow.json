@@ -1255,7 +1255,7 @@
     "list": []
   },
   "time": {
-    "from": "now-3h",
+    "from": "now-1h",
     "to": "now"
   },
   "timepicker": {
@@ -1284,7 +1284,7 @@
     ]
   },
   "timezone": "browser",
-  "title": "Kubernetes Kafka Overview, Burrow consumer lag stats, Kafka disk usage",
+  "title": "Kafka Overview, Burrow consumer lag stats, disk usage",
   "uid": "i8HLvrkiz",
   "version": 2
 }
