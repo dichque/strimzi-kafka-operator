@@ -6,6 +6,11 @@ metadata:
     app: prometheus
   annotations:
     openshift.io/display-name: "Kafka prometheus install"
+  name: prometheus
+  labels:
+    app: prometheus
+  annotations:
+    openshift.io/display-name: "Kafka prometheus install"
     openshift.io/provider-display-name: "Red Hat, Inc."
     description: "."
     tags: "kafka,prometheus,prometheus-operator,monitoring"
@@ -21,22 +26,22 @@ parameters:
   description: Namespace in which the prometheus is installed.
 - name: CPU_REQUEST
   displayName: CPU request
-  value: '.01'
+  value: '100m'
   required: true
   description: The amount of CPU to request for each container.
 - name: MEMORY_REQUEST
   displayName: Memory request
-  value: '1Gi'
+  value: '2Gi'
   required: true
   description: The amount of memory required for each container to run.
 - name: CPU_LIMIT
   displayName: CPU limit
-  value: '.03'
+  value: '200m'
   required: true
   description: The amount of CPU each container is limited to use.
 - name: MEMORY_LIMIT
   displayName: Memory limit
-  value: '200Mi'
+  value: '4Gi'
   required: true
   description: The amount of memory each container is limited to use.
 - name: CONTAINER_PORT
@@ -61,6 +66,9 @@ parameters:
 
 
 objects:
+#
+# OpenShift resources
+#
 
 - apiVersion: v1
   kind: ServiceAccount
@@ -70,6 +78,55 @@ objects:
 
 # Cluster Roles to monitor K8s objects
 # This will be delegated to CAE admins
+- apiVersion: rbac.authorization.k8s.io/v1
+  kind: Role
+  metadata:
+    namespace: ${NAMESPACE}
+    name: prometheus
+  rules:
+  - apiGroups: [""]
+    resources:
+    - nodes
+    - nodes/proxy
+    - services
+    - endpoints
+    - pods
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources:
+    - configmaps
+    verbs: ["get"]
+
+- apiVersion: rbac.authorization.k8s.io/v1beta1
+  kind: RoleBinding
+  metadata:
+    name: prometheus
+    namespace: ${NAMESPACE}
+  roleRef:
+    apiGroup: rbac.authorization.k8s.io
+    kind: Role
+    name: prometheus
+  subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: ${NAMESPACE}
+
+
+# Cluster Roles to monitor K8s objects
+# This will be delegated to CAE admins
+- apiVersion: rbac.authorization.k8s.io/v1
+  kind: ClusterRoleBinding
+  metadata:
+    name: prometheus
+  roleRef:
+    apiGroup: rbac.authorization.k8s.io
+    kind: ClusterRole
+    name: prometheus
+  subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: ${NAMESPACE}
+
 - apiVersion: rbac.authorization.k8s.io/v1
   kind: ClusterRole
   metadata:
@@ -93,6 +150,8 @@ objects:
     resources:
     - ingresses
     - configmaps
+    resources:
+    - ingresses
     verbs:
     - get
     - list
@@ -151,6 +210,7 @@ objects:
 #     namespace: ${NAMESPACE}
 
 
+
 - apiVersion: monitoring.coreos.com/v1
   kind: Prometheus
   metadata:
@@ -169,7 +229,7 @@ objects:
         cpu: ${CPU_REQUEST}
       limits:
         cpu: ${CPU_LIMIT}
-        memory: ${PROMETHEUS_MEMORY}
+        memory: ${MEMORY_LIMIT}
     additionalScrapeConfigs:
       name: additional-scrape-configs
       key: prometheus-additional.yml
