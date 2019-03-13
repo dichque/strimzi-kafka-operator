@@ -1,0 +1,73 @@
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: alertmanager
+  labels:
+    app: strimzi
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        name: alertmanager
+    spec:
+      containers:
+      - name: alertmanager
+        image: containers.cisco.com/jaganaga/alertmanager:latest
+        args:
+          - "--config.file=/etc/alertmanager/config.yml"
+          - "--storage.path=/alertmanager"
+        ports:
+        - name: alertmanager
+          containerPort: 9093
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/alertmanager
+        - name: alertmanager
+          mountPath: /alertmanager
+      imagePullSecrets:
+        - name: cisco-cred-pull-secret
+      volumes:
+      - name: config-volume
+        configMap:
+          name: alertmanager-config
+      - name: alertmanager
+        emptyDir: {}
+
+---
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: alertmanager-config
+  labels:
+    app: strimzi
+data:
+  config.yml: |-
+    global:
+      smtp_smarthost: outbound.cisco.com:25
+      smtp_from: noreply@cisco.com
+    route:
+      receiver: cisco_email
+    receivers:
+    - name: cisco_email
+      email_configs:
+      - to: jaganaga@cisco.com
+        text: "{{ range .Alerts }}{{ .Annotations.description }}\n{{ end }}"
+        send_resolved: true
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager
+  labels:
+    app: strimzi
+spec:
+  ports:
+    - name: alertmanager
+      port: 9093
+      targetPort: 9093
+      protocol: TCP
+  selector:
+    name: alertmanager
+  type: ClusterIP
