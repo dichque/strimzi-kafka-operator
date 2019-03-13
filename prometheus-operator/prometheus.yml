@@ -76,8 +76,6 @@ objects:
     name: prometheus
     namespace: ${NAMESPACE}
 
-# Cluster Roles to monitor K8s objects
-# This will be delegated to CAE admins
 - apiVersion: rbac.authorization.k8s.io/v1
   kind: Role
   metadata:
@@ -105,22 +103,6 @@ objects:
   roleRef:
     apiGroup: rbac.authorization.k8s.io
     kind: Role
-    name: prometheus
-  subjects:
-  - kind: ServiceAccount
-    name: prometheus
-    namespace: ${NAMESPACE}
-
-
-# Cluster Roles to monitor K8s objects
-# This will be delegated to CAE admins
-- apiVersion: rbac.authorization.k8s.io/v1
-  kind: ClusterRoleBinding
-  metadata:
-    name: prometheus
-  roleRef:
-    apiGroup: rbac.authorization.k8s.io
-    kind: ClusterRole
     name: prometheus
   subjects:
   - kind: ServiceAccount
@@ -209,7 +191,20 @@ objects:
 #     name: prometheus
 #     namespace: ${NAMESPACE}
 
+- apiVersion: monitoring.coreos.com/v1
+  kind: Alertmanager
+  metadata:
+    name: alertmanager
+    namespace: ${NAMESPACE}
+    spec:
+      baseImage: containers.cisco.com/jaganaga/alertmanager
+      replicas: 3
+      serviceAccountName: prometheus
+      version: v0.16.1
+      imagePullSecrets:
+        - name: cisco-cred-pull-secret
 
+# oc create secret generic alertmanager-alertmanager --from-file=alertmanager.yaml
 
 - apiVersion: monitoring.coreos.com/v1
   kind: Prometheus
@@ -230,6 +225,14 @@ objects:
       limits:
         cpu: ${CPU_LIMIT}
         memory: ${MEMORY_LIMIT}
+    alerting:
+      alertmanagers:
+      - namespace: kafka-1
+        name: alertmanager-operated
+        port: web
+    ruleSelector:
+      matchLabels:
+        team: ${KAFKA_SERVICE_TEAM}
     additionalScrapeConfigs:
       name: additional-scrape-configs
       key: prometheus-additional.yml
@@ -258,3 +261,23 @@ objects:
     to:
       kind: Service
       name: prometheus
+
+
+# - apiVersion: monitoring.coreos.com/v1
+#   kind: Alertmanager
+#   metadata:
+#     labels:
+#       alertmanager: main
+#       name: main
+#       namespace: ${NAMESPACE}
+#       spec:
+#         baseImage: containers.cisco.com/jaganaga/alertmanager
+#         nodeSelector:
+#           beta.kubernetes.io/os: linux
+#           replicas: 3
+#           securityContext:
+#             fsGroup: 2000
+#             runAsNonRoot: true
+#             runAsUser: 1000
+#             serviceAccountName: prometheus
+#             version: v0.16.1
