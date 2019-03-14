@@ -1,0 +1,117 @@
+apiVersion: template.openshift.io/v1
+kind: Template
+metadata:
+  name: kafka-prometheus-alert-rules
+  labels:
+    app: kafka-prometheus-alert-rules
+  annotations:
+    openshift.io/display-name: "Red Hat Kafka alert-rules install"
+    openshift.io/provider-display-name: "Red Hat, Inc."
+    description: "An AlertRule specifies what expression of PromQL will be executed and notified."
+    tags: "kafka,prometheus,prometheus-operator,monitoring"
+    iconClass: "icon-rh-integration"
+    version: "1.0"
+message: |-
+  prometheus-alert-rules is now deployed to ${NAMESPACE}
+parameters:
+- name: NAMESPACE
+  displayName: Namespace
+  value: kafka-1
+  required: true
+  description: Namespace in which the prometheus-operator is installed.
+- name: KAFKA_CLUSTER_NAME
+  displayName: Kafka Cluster Name
+  value: 'my-cluster'
+  required: true
+  description: The cluster name of the Kafka application to monitor.
+- name: KAFKA_SERVICE_TEAM
+  displayName: Kafka Service Team
+  value: 'aims'
+  required: true
+- name: ENDPOINT_PORT
+  displayName: Endpoint port
+  value: 'metrics'
+  required: true
+
+objects:
+- apiVersion: monitoring.coreos.com/v1
+  kind: PrometheusRule
+  metadata:
+    name: ${KAFKA_CLUSTER_NAME}-rules-1
+    namespace: ${NAMESPACE}
+    labels:
+      team: ${KAFKA_SERVICE_TEAM}
+  spec:
+    groups:
+    - name: example
+      rules:
+      - alert: ExampleAlert
+        expr: vector(1)
+    - name: kafka
+      rules:
+      - alert: KafkaRunningOutOfSpace
+        expr: kubelet_volume_stats_available_bytes{kubernetes_pod_name=~"([a-z]+-)+kafka-[0-9]+"} < 5368709120
+        for: 10s
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Kafka is running out of free disk space'
+          description: 'There are only {{ $value }} bytes available at {{ $labels.persistentvolumeclaim }} PVC'
+      - alert: UnderReplicatedPartitions
+        expr: kafka_server_replicamanager_underreplicatedpartitions > 0
+        for: 10s
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Kafka under replicated partitions'
+          description: 'There are {{ $value }} under replicated partitions on {{ $labels.kubernetes_pod_name }}'
+      - alert: AbnormalControllerState
+        expr: sum(kafka_controller_kafkacontroller_activecontrollercount) != 1
+        for: 10s
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Kafka abnormal controller state'
+          description: 'There are {{ $value }} active controllers in the cluster'
+      - alert: UnderMinIsrPartitionCount
+        expr: kafka_server_replicamanager_underminisrpartitioncount > 0
+        for: 10s
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Kafka under min ISR partitions'
+          description: 'There are {{ $value }} partitions under the min ISR on {{ $labels.kubernetes_pod_name }}'
+      - alert: OfflineLogDirectoryCount
+        expr: kafka_log_logmanager_offlinelogdirectorycount > 0
+        for: 10s
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Kafka offline log directories'
+          description: 'There are {{ $value }} offline log directoris on {{ $labels.kubernetes_pod_name }}'
+    - name: zookeeper
+      rules:
+      - alert: AvgRequestLatency
+        expr: zookeeper_avgrequestlatency > 10
+        for: 10s
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Zookeeper average request latency'
+          description: 'The average request latency is {{ $value }} on {{ $labels.kubernetes_pod_name }}'
+      - alert: OutstandingRequests
+        expr: zookeeper_outstandingrequests > 10
+        for: 10s
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Zookeeper outstanding requests'
+          description: 'There are {{ $value }} outstanding requests on {{ $labels.kubernetes_pod_name }}'
+      - alert: ZookeeperRunningOutOfSpace
+        expr: kubelet_volume_stats_available_bytes{kubernetes_pod_name=~"([a-z]+-)+zookeeper-[0-9]+"} < 5368709120
+        for: 10s
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Zookeeper is running out of free disk space'
+          description: 'There are only {{ $value }} bytes available at {{ $labels.persistentvolumeclaim }} PVC'
