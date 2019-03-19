@@ -1,12 +1,15 @@
 # oc create secret generic alertmanager-main --from-file=alertmanager.yaml
 global:
   smtp_smarthost: outbound.cisco.com:25
-  smtp_from: noreply@cisco.com
+  smtp_from: alertmanager-no-reply@cisco.com
 route:
-  receiver: cisco_email
+  receiver: aims_infra_mailer
 receivers:
-- name: cisco_email
+- name: aims_infra_mailer
   email_configs:
   - to: jaganaga@cisco.com
+    text: "{{ range .Alerts }}{{ .Annotations.description }}\n{{ end }}"
+    send_resolved: true
+  - to: aims-team@cisco.com
     text: "{{ range .Alerts }}{{ .Annotations.description }}\n{{ end }}"
     send_resolved: true
