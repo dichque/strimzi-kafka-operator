@@ -227,7 +227,7 @@ objects:
         memory: ${MEMORY_LIMIT}
     alerting:
       alertmanagers:
-      - namespace: kafka-1
+      - namespace: ${NAMESPACE}
         name: alertmanager-operated
         port: web
     ruleSelector:
