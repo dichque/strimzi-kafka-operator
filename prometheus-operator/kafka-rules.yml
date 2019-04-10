@@ -32,6 +32,10 @@ parameters:
   displayName: Endpoint port
   value: 'metrics'
   required: true
+- name: ZOOKEEPER_CONTAINER
+  displayName: zookeeper container
+  value: 'zookeeper'
+  required: true
 
 objects:
 - apiVersion: monitoring.coreos.com/v1
@@ -58,15 +62,15 @@ objects:
           summary: 'Kafka is running out of free disk space'
           description: 'There are only {{ $value }} bytes available at {{ $labels.persistentvolumeclaim }} PVC'
       - alert: UnderReplicatedPartitions
-        expr: kafka_server_replicamanager_underreplicatedpartitions > 0
+        expr: kafka_server_replicamanager_underreplicatedpartitions{endpoint="${ENDPOINT_PORT}"} > 0
         for: 10s
         labels:
           severity: warning
         annotations:
           summary: 'Kafka under replicated partitions'
-          description: 'There are {{ $value }} under replicated partitions on {{ $labels.kubernetes_pod_name }}'
+          description: 'There are {{ $value }} under replicated partitions on {{ $labels.pod }}'
       - alert: AbnormalControllerState
-        expr: sum(kafka_controller_kafkacontroller_activecontrollercount) != 1
+        expr: sum(kafka_controller_kafkacontroller_activecontrollercount{endpoint="${ENDPOINT_PORT}"}) != 1
         for: 10s
         labels:
           severity: warning
@@ -74,39 +78,88 @@ objects:
           summary: 'Kafka abnormal controller state'
           description: 'There are {{ $value }} active controllers in the cluster'
       - alert: UnderMinIsrPartitionCount
-        expr: kafka_server_replicamanager_underminisrpartitioncount > 0
+        expr: kafka_server_replicamanager_underminisrpartitioncount{endpoint="${ENDPOINT_PORT}"} > 0
         for: 10s
         labels:
           severity: warning
         annotations:
           summary: 'Kafka under min ISR partitions'
-          description: 'There are {{ $value }} partitions under the min ISR on {{ $labels.kubernetes_pod_name }}'
+          description: 'There are {{ $value }} partitions under the min ISR on {{ $labels.pod }}'
       - alert: OfflineLogDirectoryCount
-        expr: kafka_log_logmanager_offlinelogdirectorycount > 0
+        expr: kafka_log_logmanager_offlinelogdirectorycount{endpoint="${ENDPOINT_PORT}"} > 0
         for: 10s
         labels:
           severity: warning
         annotations:
           summary: 'Kafka offline log directories'
-          description: 'There are {{ $value }} offline log directoris on {{ $labels.kubernetes_pod_name }}'
+          description: 'There are {{ $value }} offline log directories on {{ $labels.pod }}'
+      - alert: OfflinePartitions
+        expr: kafka_controller_kafkacontroller_offlinepartitionscount{endpoint="${ENDPOINT_PORT}"} > 0
+        for: 10s
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Kafka offline partitions'
+          description: 'There are {{ $value }} offline partitions on {{ $labels.pod }}'
+      - alert: NetworkProcessorAvgIdlePercentage
+        expr: (kafka_network_socketserver_networkprocessoravgidle_percent{endpoint="${ENDPOINT_PORT}"}*100) < 30 and (kafka_network_socketserver_networkprocessoravgidle_percent{endpoint="${ENDPOINT_PORT}"}*100) >= 20
+        for: 10s
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Network Processor Average Idle percentage is lower than 30%'
+          description: 'Network Processor Average Idle percentage  is {{ $value }} on {{ $labels.pod }}'
+      - alert: NetworkProcessorAvgIdlePercentage
+        expr: (kafka_network_socketserver_networkprocessoravgidle_percent{endpoint="${ENDPOINT_PORT}"}*100) < 20
+        for: 10s
+        labels:
+          severity: severe
+        annotations:
+          summary: 'Network Processor Average Idle percentage is lower than 20%'
+          description: 'Network Processor Average Idle percentage  is {{ $value }} on {{ $labels.pod }}'    
+      - alert: RequestHandlerAvgIdlePercentage
+        expr: (kafka_server_kafkarequesthandlerpool_requesthandleravgidle_percent{endpoint="${ENDPOINT_PORT}"}*100) < 30 and (kafka_server_kafkarequesthandlerpool_requesthandleravgidle_percent{endpoint="${ENDPOINT_PORT}"}*100) > 20
+        for: 10s
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Request Handler Average Idle percentage is lower than 30%'
+          description: 'Request Handler Average Idle percentage  is {{ $value }} on {{ $labels.pod }}'
+      - alert: RequestHandlerAvgIdlePercentage
+        expr: (kafka_server_kafkarequesthandlerpool_requesthandleravgidle_percent{endpoint="${ENDPOINT_PORT}"}*100) < 20
+        for: 10s
+        labels:
+          severity: severe
+        annotations:
+          summary: 'Reaquest handler Average Idle percentage is lower than 20%'
+          description: 'Request Handler Average Idle percentage  is {{ $value }} on {{ $labels.pod }}'
+      - alert: BrokerCount
+        expr: count(kafka_server_kafkaserver_brokerstate{endpoint="${ENDPOINT_PORT}"} == 3) < count(kafka_server_kafkaserver_brokerstate{endpoint="${ENDPOINT_PORT}"})*0.66
+        for: 10s
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Broker count dropped'
+          description: 'Broker count is {{ $value }}'
+
     - name: zookeeper
       rules:
       - alert: AvgRequestLatency
-        expr: zookeeper_avgrequestlatency > 10
+        expr: zookeeper_avgrequestlatency{endpoint="${ENDPOINT_PORT}"} > 10
         for: 10s
         labels:
           severity: warning
         annotations:
           summary: 'Zookeeper average request latency'
-          description: 'The average request latency is {{ $value }} on {{ $labels.kubernetes_pod_name }}'
+          description: 'The average request latency is {{ $value }} on {{ $labels.pod }}'
       - alert: OutstandingRequests
-        expr: zookeeper_outstandingrequests > 10
+        expr: zookeeper_outstandingrequests{endpoint="${ENDPOINT_PORT}"} > 10
         for: 10s
         labels:
           severity: warning
         annotations:
           summary: 'Zookeeper outstanding requests'
-          description: 'There are {{ $value }} outstanding requests on {{ $labels.kubernetes_pod_name }}'
+          description: 'There are {{ $value }} outstanding requests on {{ $labels.pod }}'
       - alert: ZookeeperRunningOutOfSpace
         expr: kubelet_volume_stats_available_bytes{kubernetes_pod_name=~"([a-z]+-)+zookeeper-[0-9]+"} < 5368709120
         for: 10s
@@ -115,3 +168,21 @@ objects:
         annotations:
           summary: 'Zookeeper is running out of free disk space'
           description: 'There are only {{ $value }} bytes available at {{ $labels.persistentvolumeclaim }} PVC'
+      - alert: QuorumSize
+        expr: zookeeper_quorumsize{endpoint="${ENDPOINT_PORT}"} < max_over_time(zookeeper_quorumsize{endpoint="${ENDPOINT_PORT}"}[15m])*0.66
+        for: 10s
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Quorum size dropped'
+          description: 'Quorum size is {{$value}} on {{ $labels.pod }}'
+      - alert: ZookeeperMemoryUsage
+        expr: sum(container_memory_usage_bytes{namespace="${NAMESPACE}",container_name="${ZOOKEEPER_CONTAINER}"}) by (kubernetes_pod_name) > (sum(container_spec_memory_limit_bytes{namespace="${NAMESPACE}",container_name="${ZOOKEEPER_CONTAINER}"}) by (kubernetes_pod_name))*0.8
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Memory usage is high'
+          description: '{{ $value }} memory used on {{$labels.kubernetes_pod_name}}'
+
+
