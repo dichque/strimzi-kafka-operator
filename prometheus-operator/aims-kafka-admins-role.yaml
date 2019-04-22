@@ -1,0 +1,50 @@
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRole
+metadata:
+  name: aims-kafka-admins
+rules:
+- apiGroups:
+  - "kafka.strimzi.io"
+  resources:
+  - kafkas
+  - kafkaconnects
+  - kafkaconnects2is
+  - kafkamirrormakers
+  - kafkausers
+  - kafkatopics
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - delete
+  - patch
+  - update
+- apiGroups:
+  - "monitoring.coreos.com"
+  resources:
+  - alertmanagers
+  - prometheuses
+  - prometheusrules
+  - servicemonitors
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - delete
+  - patch
+  - update
+- apiGroups:
+  - "monitors.aims.cisco.com"
+  resources:
+  - grafanas
+  - burrows
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - delete
+  - patch
+  - update
