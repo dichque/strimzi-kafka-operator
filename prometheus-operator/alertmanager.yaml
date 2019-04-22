@@ -10,6 +10,6 @@ receivers:
   - to: jaganaga@cisco.com
     text: "{{ range .Alerts }}{{ .Annotations.description }}\n{{ end }}"
     send_resolved: true
-  - to: aims-team@cisco.com
+  - to: kafka-support@cisco.com
     text: "{{ range .Alerts }}{{ .Annotations.description }}\n{{ end }}"
     send_resolved: true
