@@ -168,8 +168,8 @@ objects:
           # - --namespaces=${NAMESPACE}
           - --logtostderr=true
           - --config-reloader-image=containers.cisco.com/jaganaga/configmap-reload:v0.0.1
-          - --prometheus-config-reloader=containers.cisco.com/jaganaga/prometheus-config-reloader:v0.26.0
-          image: containers.cisco.com/jaganaga/prometheus-operator:v0.26.0
+          - --prometheus-config-reloader=containers.cisco.com/jaganaga/prometheus-config-reloader:v0.29.0
+          image: containers.cisco.com/jaganaga/prometheus-operator:v0.29.0
           name: prometheus-operator
           ports:
           - containerPort: ${CONTAINER_PORT}
@@ -182,3 +182,5 @@ objects:
               cpu: ${CPU_REQUEST}
               memory: ${MEMORY_REQUEST}
         serviceAccountName: prometheus-operator
+        imagePullSecrets:
+        - name: cisco-secret
