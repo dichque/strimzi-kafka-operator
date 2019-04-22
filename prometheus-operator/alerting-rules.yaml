@@ -26,7 +26,7 @@ data:
           summary: 'Kafka under replicated partitions'
           description: 'There are {{ $value }} under replicated partitions on {{ $labels.kubernetes_pod_name }}'
       - alert: AbnormalControllerState
-        expr: sum(kafka_controller_kafkacontroller_activecontrollercount) != 1
+        expr: sum(kafka_controller_kafkacontroller_activecontrollercount{endpoint="metrics"}) != 1
         for: 10s
         labels:
           severity: warning
@@ -75,3 +75,4 @@ data:
         annotations:
           summary: 'Zookeeper is running out of free disk space'
           description: 'There are only {{ $value }} bytes available at {{ $labels.persistentvolumeclaim }} PVC'
+
