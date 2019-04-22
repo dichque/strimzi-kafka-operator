@@ -1,30 +1,18 @@
 apiVersion: monitoring.coreos.com/v1
 kind: Alertmanager
 metadata:
-  name: kafka
+  name: alertmanager
 spec:
-  baseImage: containers.cisco.com/jaganaga/alertmanager
-  replicas: 1
+  baseImage: prom/alertmanager
+  replicas: 3
   # securityContext:
   #   fsGroup: 2000
   #   runAsNonRoot: true
   #   runAsUser: 1000
   serviceAccountName: prometheus
-  version: v0.16.1
+  version: v0.16.2
   imagePullSecrets:
-  - name: cisco-cred-pull-secret
+  - name: cisco-secret
 
-# oc create secret generic alertmanager-kafka --from-file=alertmanager.yaml
+# oc create secret generic alertmanager-alertmanager --from-file=alertmanager.yaml
 
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: alertmanager-kafka
-spec:
-  ports:
-  - name: alertmanager
-    port: 9093
-    targetPort: alertmanager
-  selector:
-    alertmanager: kafka
