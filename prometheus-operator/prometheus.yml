@@ -202,7 +202,7 @@ objects:
       serviceAccountName: prometheus
       version: v0.16.1
       imagePullSecrets:
-        - name: cisco-cred-pull-secret
+        - name: cisco-secret
 
 # oc create secret generic alertmanager-alertmanager --from-file=alertmanager.yaml
 
