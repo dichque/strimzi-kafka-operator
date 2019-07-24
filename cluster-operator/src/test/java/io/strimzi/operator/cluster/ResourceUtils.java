@@ -6,8 +6,10 @@ package io.strimzi.operator.cluster;
 
 import io.fabric8.kubernetes.api.model.ObjectMeta;
 import io.fabric8.kubernetes.api.model.ObjectMetaBuilder;
+import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.api.model.SecretBuilder;
+import io.fabric8.kubernetes.client.KubernetesClient;
 import io.strimzi.api.kafka.model.EphemeralStorage;
 import io.strimzi.api.kafka.model.Kafka;
 import io.strimzi.api.kafka.model.KafkaBuilder;
@@ -16,8 +18,8 @@ import io.strimzi.api.kafka.model.KafkaConnect;
 import io.strimzi.api.kafka.model.KafkaConnectBuilder;
 import io.strimzi.api.kafka.model.KafkaConnectS2I;
 import io.strimzi.api.kafka.model.KafkaConnectS2IBuilder;
-import io.strimzi.api.kafka.model.KafkaListenerPlain;
-import io.strimzi.api.kafka.model.KafkaListenerTls;
+import io.strimzi.api.kafka.model.listener.KafkaListenerPlain;
+import io.strimzi.api.kafka.model.listener.KafkaListenerTls;
 import io.strimzi.api.kafka.model.KafkaMirrorMaker;
 import io.strimzi.api.kafka.model.KafkaMirrorMakerBuilder;
 import io.strimzi.api.kafka.model.KafkaMirrorMakerConsumerSpec;
@@ -26,19 +28,36 @@ import io.strimzi.api.kafka.model.KafkaSpec;
 import io.strimzi.api.kafka.model.Logging;
 import io.strimzi.api.kafka.model.Probe;
 import io.strimzi.api.kafka.model.ProbeBuilder;
+import io.strimzi.api.kafka.model.SingleVolumeStorage;
 import io.strimzi.api.kafka.model.Storage;
 import io.strimzi.api.kafka.model.TopicOperatorSpec;
 import io.strimzi.api.kafka.model.ZookeeperClusterSpec;
 import io.strimzi.operator.cluster.model.AbstractModel;
+import io.strimzi.operator.cluster.model.Ca;
 import io.strimzi.operator.cluster.model.ClientsCa;
 import io.strimzi.operator.cluster.model.ClusterCa;
 import io.strimzi.operator.cluster.model.KafkaCluster;
 import io.strimzi.operator.cluster.model.ZookeeperCluster;
+import io.strimzi.operator.cluster.operator.resource.ZookeeperLeaderFinder;
+import io.strimzi.operator.common.BackOff;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.operator.common.operator.MockCertManager;
+import io.strimzi.operator.common.operator.resource.SecretOperator;
+import io.strimzi.operator.common.operator.resource.WorkaroundRbacOperator;
 import io.strimzi.test.TestUtils;
+import io.vertx.core.Future;
+import io.vertx.core.Vertx;
+import io.vertx.core.net.NetClientOptions;
+import io.vertx.core.net.PemKeyCertOptions;
+import io.vertx.core.net.PemTrustOptions;
+import okhttp3.Call;
+import okhttp3.OkHttpClient;
+import okhttp3.Protocol;
+import okhttp3.Request;
+import okhttp3.Response;
 
 import java.io.IOException;
+import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -48,7 +67,16 @@ import java.util.Map;
 
 import static java.util.Collections.emptyMap;
 import static java.util.Collections.singletonMap;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
+@SuppressWarnings({
+        "checkstyle:ClassDataAbstractionCoupling",
+        "checkstyle:ClassFanOutComplexity"
+})
 public class ResourceUtils {
 
     private ResourceUtils() {
@@ -138,7 +166,7 @@ public class ResourceUtils {
                 initialClientsCaCert,
                 KafkaCluster.clientsCaKeySecretName(clusterName),
                 initialClientsCaKey,
-                365, 30, true);
+                365, 30, true, null);
     }
 
     public static Secret createInitialCaCertSecret(String clusterNamespace, String clusterName, String secretName, String caCert) {
@@ -146,6 +174,7 @@ public class ResourceUtils {
                 .withNewMetadata()
                     .withName(secretName)
                     .withNamespace(clusterNamespace)
+                    .addToAnnotations(Ca.ANNO_STRIMZI_IO_CA_CERT_GENERATION, "0")
                     .withLabels(Labels.forCluster(clusterName).withKind(Kafka.RESOURCE_KIND).toMap())
                 .endMetadata()
                 .addToData("ca.crt", caCert)
@@ -157,6 +186,7 @@ public class ResourceUtils {
                 .withNewMetadata()
                     .withName(secretName)
                     .withNamespace(clusterNamespace)
+                    .addToAnnotations(Ca.ANNO_STRIMZI_IO_CA_KEY_GENERATION, "0")
                     .withLabels(Labels.forCluster(clusterName).withKind(Kafka.RESOURCE_KIND).toMap())
                 .endMetadata()
                 .addToData("ca.key", caKey)
@@ -267,7 +297,8 @@ public class ResourceUtils {
                                            Map<String, Object> metricsCm,
                                            Map<String, Object> kafkaConfiguration,
                                            Map<String, Object> zooConfiguration,
-                                           Storage storage,
+                                           Storage kafkaStorage,
+                                           SingleVolumeStorage zkStorage,
                                            TopicOperatorSpec topicOperatorSpec,
                                            Logging kafkaLogging, Logging zkLogging) {
         Kafka result = new Kafka();
@@ -296,7 +327,7 @@ public class ResourceUtils {
         if (kafkaConfiguration != null) {
             kafkaClusterSpec.setConfig(kafkaConfiguration);
         }
-        kafkaClusterSpec.setStorage(storage);
+        kafkaClusterSpec.setStorage(kafkaStorage);
         spec.setKafka(kafkaClusterSpec);
 
         ZookeeperClusterSpec zk = new ZookeeperClusterSpec();
@@ -310,7 +341,7 @@ public class ResourceUtils {
         if (zooConfiguration != null) {
             zk.setConfig(zooConfiguration);
         }
-        zk.setStorage(storage);
+        zk.setStorage(zkStorage);
         if (metricsCm != null) {
             zk.setMetrics(metricsCm);
         }
@@ -417,6 +448,48 @@ public class ResourceUtils {
                 }
             });
         } catch (IOException e) {
+        }
+    }
+
+    public static ZookeeperLeaderFinder zookeeperLeaderFinder(Vertx vertx, KubernetesClient client) {
+        return new ZookeeperLeaderFinder(vertx, new SecretOperator(vertx, client),
+            () -> new BackOff(5_000, 2, 4)) {
+            @Override
+            protected Future<Boolean> isLeader(Pod pod, NetClientOptions options) {
+                return Future.succeededFuture(true);
+            }
+
+            @Override
+            protected PemTrustOptions trustOptions(Secret s) {
+                return new PemTrustOptions();
+            }
+
+            @Override
+            protected PemKeyCertOptions keyCertOptions(Secret s) {
+                return new PemKeyCertOptions();
+            }
+        };
+    }
+
+    /**
+     * @deprecated this can be removed when {@link WorkaroundRbacOperator} is removed.
+     */
+    @Deprecated
+    public static void mockHttpClientForWorkaroundRbac(KubernetesClient mockClient) {
+        when(mockClient.isAdaptable(OkHttpClient.class)).thenReturn(true);
+        OkHttpClient mc = mock(OkHttpClient.class);
+        try {
+            doAnswer(i -> {
+                Call call = mock(Call.class);
+                Request req = i.getArgument(0);
+                Response resp = new Response.Builder().protocol(Protocol.HTTP_1_1).request(req).code(200).message("OK").build();
+                doReturn(resp).when(call).execute();
+                return call;
+            }).when(mc).newCall(any());
+            when(mockClient.adapt(OkHttpClient.class)).thenReturn(mc);
+            when(mockClient.getMasterUrl()).thenReturn(new URL("http://localhost"));
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
     }
 }

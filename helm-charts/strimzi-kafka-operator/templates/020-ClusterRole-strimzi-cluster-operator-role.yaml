@@ -106,6 +106,7 @@ rules:
   - deployments/scale
   - deployments/status
   - statefulsets
+  - replicasets
   verbs:
   - get
   - list
@@ -225,6 +226,7 @@ rules:
   - route.openshift.io
   resources:
   - routes
+  - routes/custom-host
   verbs:
   - get
   - list

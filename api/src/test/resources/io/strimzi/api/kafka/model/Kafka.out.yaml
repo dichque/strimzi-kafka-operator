@@ -2,9 +2,7 @@
 apiVersion: "kafka.strimzi.io/v1alpha1"
 kind: "Kafka"
 metadata:
-  finalizers: []
   name: "strimzi-ephemeral"
-  ownerReferences: []
 spec:
   kafka:
     replicas: 3
@@ -19,29 +17,23 @@ spec:
           type: "scram-sha-512"
         networkPolicyPeers:
         - namespaceSelector:
-            matchExpressions: []
             matchLabels:
               kafka-enabled: "true"
           podSelector:
-            matchExpressions: []
             matchLabels:
               app: "kafka-consumer"
         - podSelector:
-            matchExpressions: []
             matchLabels:
               app: "kafka-producer"
       tls:
         networkPolicyPeers:
         - namespaceSelector:
-            matchExpressions: []
             matchLabels:
               kafka-enabled: "true"
           podSelector:
-            matchExpressions: []
             matchLabels:
               app: "kafka-consumer"
         - podSelector:
-            matchExpressions: []
             matchLabels:
               app: "kafka-producer"
         authentication:
@@ -52,17 +44,31 @@ spec:
           type: "tls"
         networkPolicyPeers:
         - namespaceSelector:
-            matchExpressions: []
             matchLabels:
               kafka-enabled: "true"
           podSelector:
-            matchExpressions: []
             matchLabels:
               app: "kafka-consumer"
         - podSelector:
-            matchExpressions: []
             matchLabels:
               app: "kafka-producer"
+        overrides:
+          bootstrap:
+            address: "my-bootstrap-host"
+            host: "my-bootstrap-host"
+          brokers:
+          - broker: 0
+            advertisedHost: "my-broker-0"
+            advertisedPort: 10000
+            host: "my-broker-0"
+          - broker: 1
+            advertisedHost: "my-broker-1"
+            advertisedPort: 10001
+            host: "my-broker-1"
+          - broker: 2
+            advertisedHost: "my-broker-2"
+            advertisedPort: 10002
+            host: "my-broker-2"
     authorization:
       type: "simple"
       superUsers:

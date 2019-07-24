@@ -23,9 +23,11 @@ import io.strimzi.operator.cluster.model.KafkaVersion;
 import io.strimzi.operator.cluster.model.ZookeeperCluster;
 import io.strimzi.operator.cluster.operator.resource.ResourceOperatorSupplier;
 import io.strimzi.operator.cluster.operator.resource.StatefulSetOperator;
+import io.strimzi.operator.cluster.operator.resource.ZookeeperLeaderFinder;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.model.ResourceType;
 import io.strimzi.operator.common.operator.MockCertManager;
+import io.strimzi.test.mockkube.MockKube;
 import io.vertx.core.Vertx;
 import io.vertx.ext.unit.Async;
 import io.vertx.ext.unit.TestContext;
@@ -86,20 +88,20 @@ public class PartialRollingUpdateTest {
                 .withNewSpec()
                     .withNewKafka()
                         .withReplicas(5)
-                        .withNewPersistentClaimStorageStorage()
+                        .withNewPersistentClaimStorage()
                             .withSize("123")
                             .withStorageClass("foo")
                             .withDeleteClaim(true)
-                        .endPersistentClaimStorageStorage()
+                        .endPersistentClaimStorage()
                         .withMetrics(emptyMap())
                     .endKafka()
                     .withNewZookeeper()
                         .withReplicas(3)
-                        .withNewPersistentClaimStorageStorage()
+                        .withNewPersistentClaimStorage()
                             .withSize("123")
                             .withStorageClass("foo")
                             .withDeleteClaim(true)
-                        .endPersistentClaimStorageStorage()
+                        .endPersistentClaimStorage()
                         .withMetrics(emptyMap())
                     .endZookeeper()
                     .withNewTopicOperator()
@@ -114,10 +116,11 @@ public class PartialRollingUpdateTest {
                 .withInitialInstances(Collections.singleton(cluster))
                 .end()
                 .build();
+        ResourceUtils.mockHttpClientForWorkaroundRbac(bootstrapClient);
 
-        ResourceOperatorSupplier supplier = new ResourceOperatorSupplier(vertx, bootstrapClient, true, 60_000L);
+        ResourceOperatorSupplier supplier = supplier(bootstrapClient);
         KafkaAssemblyOperator kco = new KafkaAssemblyOperator(vertx, true, 2_000,
-                new MockCertManager(), supplier, VERSIONS);
+                new MockCertManager(), supplier, VERSIONS, null);
 
         LOGGER.info("bootstrap reconciliation");
         Async createAsync = context.async();
@@ -144,6 +147,11 @@ public class PartialRollingUpdateTest {
         this.clientsCaKey = bootstrapClient.secrets().inNamespace(NAMESPACE).withName(KafkaResources.clientsCaKeySecretName(CLUSTER_NAME)).get();
     }
 
+    ResourceOperatorSupplier supplier(KubernetesClient bootstrapClient) {
+        ZookeeperLeaderFinder leaderFinder = ResourceUtils.zookeeperLeaderFinder(vertx, bootstrapClient);
+        return new ResourceOperatorSupplier(vertx, bootstrapClient, leaderFinder, true, 60_000L);
+    }
+
     private void startKube() {
         CustomResourceDefinition kafkaAssemblyCrd = Crds.kafka();
 
@@ -155,11 +163,12 @@ public class PartialRollingUpdateTest {
                 .withInitialPods(set(zkPod0, zkPod1, zkPod2, kafkaPod0, kafkaPod1, kafkaPod2, kafkaPod3, kafkaPod4))
                 .withInitialSecrets(set(clusterCaCert, clusterCaKey, clientsCaCert, clientsCaKey))
                 .build();
+        ResourceUtils.mockHttpClientForWorkaroundRbac(mockClient);
 
-        ResourceOperatorSupplier supplier = new ResourceOperatorSupplier(vertx, mockClient, true, 60_000L);
+        ResourceOperatorSupplier supplier = supplier(mockClient);
 
         this.kco = new KafkaAssemblyOperator(vertx, true, 2_000,
-                new MockCertManager(), supplier, VERSIONS);
+                new MockCertManager(), supplier, VERSIONS, null);
         LOGGER.info("Started test KafkaAssemblyOperator");
     }
 

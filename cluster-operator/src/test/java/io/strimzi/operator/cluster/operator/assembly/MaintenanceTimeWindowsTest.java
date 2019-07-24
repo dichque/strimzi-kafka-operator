@@ -23,6 +23,7 @@ import io.strimzi.api.kafka.model.KafkaBuilder;
 import io.strimzi.api.kafka.model.KafkaResources;
 import io.strimzi.api.kafka.model.TopicOperatorSpec;
 import io.strimzi.api.kafka.model.TopicOperatorSpecBuilder;
+import io.strimzi.operator.cluster.ResourceUtils;
 import io.strimzi.operator.cluster.model.Ca;
 import io.strimzi.operator.cluster.model.ClientsCa;
 import io.strimzi.operator.cluster.model.ClusterCa;
@@ -35,6 +36,7 @@ import io.strimzi.operator.cluster.operator.resource.ResourceOperatorSupplier;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.model.ResourceType;
 import io.strimzi.operator.common.operator.resource.ReconcileResult;
+import io.strimzi.test.mockkube.MockKube;
 import io.vertx.core.AsyncResult;
 import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
@@ -85,6 +87,7 @@ public class MaintenanceTimeWindowsTest {
                 .withInitialInstances(Collections.singleton(this.kafka))
                 .end()
                 .build();
+        ResourceUtils.mockHttpClientForWorkaroundRbac(mockClient);
 
         this.clusterCaSecret = new SecretBuilder()
                 .withNewMetadata()
@@ -109,7 +112,7 @@ public class MaintenanceTimeWindowsTest {
         ResourceOperatorSupplier ros =
                 new ResourceOperatorSupplier(this.vertx, this.mockClient, false, 60_000L);
 
-        KafkaAssemblyOperator kao = new KafkaAssemblyOperator(this.vertx, false, 2_000, null, ros, VERSIONS);
+        KafkaAssemblyOperator kao = new KafkaAssemblyOperator(this.vertx, false, 2_000, null, ros, VERSIONS, null);
 
         Reconciliation reconciliation = new Reconciliation("test-trigger", ResourceType.KAFKA, NAMESPACE, NAME);
 
@@ -182,7 +185,7 @@ public class MaintenanceTimeWindowsTest {
                 String generation = getClusterCaGenerationPod(ZookeeperCluster.zookeeperPodName(NAME, 0));
                 context.assertEquals("1", generation, "Pod had unexpected generation " + generation);
                 async.complete();
-            });
+            }, true, false);
 
         async.await();
     }
@@ -198,7 +201,7 @@ public class MaintenanceTimeWindowsTest {
                 String generation = getClusterCaGenerationPod(ZookeeperCluster.zookeeperPodName(NAME, 0));
                 context.assertEquals("0", generation, "Pod had unexpected generation " + generation);
                 async.complete();
-            });
+            }, false, false);
 
         async.await();
     }
@@ -214,7 +217,7 @@ public class MaintenanceTimeWindowsTest {
                 String generation = getClusterCaGenerationPod(ZookeeperCluster.zookeeperPodName(NAME, 0));
                 context.assertEquals("1", generation, "Pod had unexpected generation " + generation);
                 async.complete();
-            });
+            }, true, false);
 
         async.await();
     }
@@ -230,7 +233,7 @@ public class MaintenanceTimeWindowsTest {
                 String generation = getClusterCaGenerationPod(ZookeeperCluster.zookeeperPodName(NAME, 0));
                 context.assertEquals("1", generation, "Pod had unexpected generation " + generation);
                 async.complete();
-            });
+            }, true, false);
 
         async.await();
     }
@@ -246,7 +249,7 @@ public class MaintenanceTimeWindowsTest {
                 String generation = getClusterCaGenerationPod(KafkaCluster.kafkaPodName(NAME, 0));
                 context.assertEquals("1", generation, "Pod had unexpected generation " + generation);
                 async.complete();
-            });
+            }, true, false);
 
         async.await();
     }
@@ -262,7 +265,7 @@ public class MaintenanceTimeWindowsTest {
                 String generation = getClusterCaGenerationPod(KafkaCluster.kafkaPodName(NAME, 0));
                 context.assertEquals("0", generation, "Pod had unexpected generation " + generation);
                 async.complete();
-            });
+            }, true, false);
 
         async.await();
     }
@@ -278,7 +281,7 @@ public class MaintenanceTimeWindowsTest {
                 String generation = getClusterCaGenerationPod(KafkaCluster.kafkaPodName(NAME, 0));
                 context.assertEquals("1", generation, "Pod had unexpected generation " + generation);
                 async.complete();
-            });
+            }, true, false);
 
         async.await();
     }
@@ -294,7 +297,7 @@ public class MaintenanceTimeWindowsTest {
                 String generation = getClusterCaGenerationPod(KafkaCluster.kafkaPodName(NAME, 0));
                 context.assertEquals("1", generation, "Pod had unexpected generation " + generation);
                 async.complete();
-            });
+            }, true, false);
 
         async.await();
     }
@@ -437,11 +440,12 @@ public class MaintenanceTimeWindowsTest {
     }
 
     private void doZkRollingUpdate(List<String> maintenanceTimeWindows, Supplier<Date> dateSupplier,
-                                   Handler<AsyncResult<KafkaAssemblyOperator.ReconciliationState>> handler) {
+                                   Handler<AsyncResult<KafkaAssemblyOperator.ReconciliationState>> handler, boolean caCertChanged,
+                                   boolean crChanged) {
 
         this.init(maintenanceTimeWindows);
 
-        StatefulSet zkSS = ZookeeperCluster.fromCrd(this.kafka, VERSIONS).generateStatefulSet(false);
+        StatefulSet zkSS = ZookeeperCluster.fromCrd(this.kafka, VERSIONS).generateStatefulSet(false, null);
         zkSS.getSpec().getTemplate().getMetadata().getAnnotations().put(Ca.ANNO_STRIMZI_IO_CLUSTER_CA_CERT_GENERATION, "0");
         this.mockClient.apps().statefulSets().inNamespace(NAMESPACE).withName(ZookeeperCluster.zookeeperClusterName(NAME)).create(zkSS);
 
@@ -450,7 +454,7 @@ public class MaintenanceTimeWindowsTest {
 
             @Override
             public boolean certRenewed() {
-                return true;
+                return caCertChanged;
             }
         };
 
@@ -458,15 +462,18 @@ public class MaintenanceTimeWindowsTest {
         z.getSpec().getTemplate().getMetadata().getAnnotations().put(Ca.ANNO_STRIMZI_IO_CLUSTER_CA_CERT_GENERATION, "1");
         this.mockClient.apps().statefulSets().inNamespace(NAMESPACE).withName(ZookeeperCluster.zookeeperClusterName(NAME)).patch(z);
 
+
+        this.reconciliationState.setZkAncillaryCmChange(crChanged);
         this.reconciliationState.zkRollingUpdate(dateSupplier).setHandler(handler);
     }
 
     private void doKafkaRollingUpdate(List<String> maintenanceTimeWindows, Supplier<Date> dateSupplier,
-                                      Handler<AsyncResult<KafkaAssemblyOperator.ReconciliationState>> handler) {
+                                      Handler<AsyncResult<KafkaAssemblyOperator.ReconciliationState>> handler,
+                                      boolean caCertChanged, boolean crChanged) {
 
         this.init(maintenanceTimeWindows);
 
-        StatefulSet kafkaSS = KafkaCluster.fromCrd(this.kafka, VERSIONS).generateStatefulSet(false);
+        StatefulSet kafkaSS = KafkaCluster.fromCrd(this.kafka, VERSIONS).generateStatefulSet(false, null);
         kafkaSS.getSpec().getTemplate().getMetadata().getAnnotations().put(Ca.ANNO_STRIMZI_IO_CLUSTER_CA_CERT_GENERATION, "0");
         kafkaSS.getSpec().getTemplate().getMetadata().getAnnotations().put(Ca.ANNO_STRIMZI_IO_CLIENTS_CA_CERT_GENERATION, "0");
         this.mockClient.apps().statefulSets().inNamespace(NAMESPACE).withName(KafkaCluster.kafkaClusterName(NAME)).create(kafkaSS);
@@ -476,14 +483,14 @@ public class MaintenanceTimeWindowsTest {
 
             @Override
             public boolean certRenewed() {
-                return true;
+                return caCertChanged;
             }
         };
-        this.reconciliationState.clientsCa = new ClientsCa(null, null, this.clientsCaSecret, null, null, 0, 0, true) {
+        this.reconciliationState.clientsCa = new ClientsCa(null, null, this.clientsCaSecret, null, null, 0, 0, true, null) {
 
             @Override
             public boolean certRenewed() {
-                return false;
+                return caCertChanged;
             }
         };
 
@@ -491,6 +498,7 @@ public class MaintenanceTimeWindowsTest {
         k.getSpec().getTemplate().getMetadata().getAnnotations().put(Ca.ANNO_STRIMZI_IO_CLUSTER_CA_CERT_GENERATION, "1");
         k.getSpec().getTemplate().getMetadata().getAnnotations().put(Ca.ANNO_STRIMZI_IO_CLIENTS_CA_CERT_GENERATION, "0");
         this.mockClient.apps().statefulSets().inNamespace(NAMESPACE).withName(KafkaCluster.kafkaClusterName(NAME)).patch(k);
+        this.reconciliationState.setKafkaAncillaryCmChange(crChanged);
 
         this.reconciliationState.kafkaRollingUpdate(dateSupplier).setHandler(handler);
     }
@@ -501,13 +509,20 @@ public class MaintenanceTimeWindowsTest {
         this.init(maintenanceTimeWindows);
 
         EntityOperator eo = EntityOperator.fromCrd(this.kafka);
-        Deployment eoDep = eo.generateDeployment(false, Collections.EMPTY_MAP);
+        Deployment eoDep = eo.generateDeployment(false, Collections.EMPTY_MAP, null);
         eoDep.getSpec().getTemplate().getMetadata().getAnnotations().put(Ca.ANNO_STRIMZI_IO_CLUSTER_CA_CERT_GENERATION, "0");
         this.mockClient.extensions().deployments().inNamespace(NAMESPACE).withName(EntityOperator.entityOperatorName(NAME)).create(eoDep);
 
         this.reconciliationState.entityOperator = eo;
         this.reconciliationState.eoDeployment = eoDep;
         this.reconciliationState.clusterCa = new ClusterCa(null, null, this.clusterCaSecret, null) {
+
+            @Override
+            public boolean certRenewed() {
+                return true;
+            }
+        };
+        this.reconciliationState.clientsCa = new ClientsCa(null, null, this.clientsCaSecret, null, null, 1, 1, false, null) {
 
             @Override
             public boolean certRenewed() {
@@ -525,7 +540,7 @@ public class MaintenanceTimeWindowsTest {
         this.initWithTopicOperator(maintenanceTimeWindows);
 
         TopicOperator to = TopicOperator.fromCrd(this.kafka);
-        Deployment toDep = to.generateDeployment(false);
+        Deployment toDep = to.generateDeployment(false, null);
         toDep.getSpec().getTemplate().getMetadata().getAnnotations().put(Ca.ANNO_STRIMZI_IO_CLUSTER_CA_CERT_GENERATION, "0");
         this.mockClient.extensions().deployments().inNamespace(NAMESPACE).withName(TopicOperator.topicOperatorName(NAME)).create(toDep);
 
@@ -540,5 +555,133 @@ public class MaintenanceTimeWindowsTest {
         };
 
         this.reconciliationState.topicOperatorDeployment(dateSupplier).setHandler(handler);
+    }
+
+    @Test
+    public void testZkRollingUpdateMaintenanceNotSatisfiedCertNotChangedSomethingElseIs(TestContext context) {
+
+        Async async = context.async();
+
+        doZkRollingUpdate(Collections.singletonList("* * 8-10 * * ?"),
+            () -> Date.from(LocalDateTime.of(2018, 11, 26, 11, 00, 0).atZone(ZoneId.of("GMT")).toInstant()),
+            r -> {
+                String generation = getClusterCaGenerationPod(ZookeeperCluster.zookeeperPodName(NAME, 0));
+                context.assertEquals("1", generation, "Pod had unexpected generation " + generation);
+                async.complete();
+            }, false, true);
+
+        async.await();
+    }
+
+    @Test
+    public void testZkRollingUpdateMaintenanceNotSatisfiedCertChangedSomethingElseIs(TestContext context) {
+
+        Async async = context.async();
+
+        doZkRollingUpdate(Collections.singletonList("* * 8-10 * * ?"),
+            () -> Date.from(LocalDateTime.of(2018, 11, 26, 11, 00, 0).atZone(ZoneId.of("GMT")).toInstant()),
+            r -> {
+                String generation = getClusterCaGenerationPod(ZookeeperCluster.zookeeperPodName(NAME, 0));
+                context.assertEquals("1", generation, "Pod had unexpected generation " + generation);
+                async.complete();
+            }, true, true);
+
+        async.await();
+    }
+
+    @Test
+    public void testZkRollingUpdateMaintenanceNotSatisfiedCertChangedSomethingElseIsNot(TestContext context) {
+
+        Async async = context.async();
+
+        doZkRollingUpdate(Collections.singletonList("* * 8-10 * * ?"),
+            () -> Date.from(LocalDateTime.of(2018, 11, 26, 11, 00, 0).atZone(ZoneId.of("GMT")).toInstant()),
+            r -> {
+                String generation = getClusterCaGenerationPod(ZookeeperCluster.zookeeperPodName(NAME, 0));
+                context.assertEquals("0", generation, "Pod had unexpected generation " + generation);
+                async.complete();
+            }, true, false);
+
+        async.await();
+    }
+
+    @Test
+    public void testZkRollingUpdateMaintenanceSatisfiedCertChangedSomethingElseIsNot(TestContext context) {
+
+        Async async = context.async();
+
+        doZkRollingUpdate(Collections.singletonList("* * 8-10 * * ?"),
+            () -> Date.from(LocalDateTime.of(2018, 11, 26, 9, 00, 0).atZone(ZoneId.of("GMT")).toInstant()),
+            r -> {
+                String generation = getClusterCaGenerationPod(ZookeeperCluster.zookeeperPodName(NAME, 0));
+                context.assertEquals("1", generation, "Pod had unexpected generation " + generation);
+                async.complete();
+            }, true, false);
+
+        async.await();
+    }
+
+    @Test
+    public void testKafkaRollingUpdateMaintenanceNotSatisfiedCertNotChangedSomethingElseIs(TestContext context) {
+
+        Async async = context.async();
+
+        doKafkaRollingUpdate(Collections.singletonList("* * 8-10 * * ?"),
+            () -> Date.from(LocalDateTime.of(2018, 11, 26, 11, 00, 0).atZone(ZoneId.of("GMT")).toInstant()),
+            r -> {
+                String generation = getClusterCaGenerationPod(KafkaCluster.kafkaPodName(NAME, 0));
+                context.assertEquals("1", generation, "Pod had unexpected generation " + generation);
+                async.complete();
+            }, false, true);
+
+        async.await();
+    }
+
+    @Test
+    public void testKafkaRollingUpdateMaintenanceNotSatisfiedCertChangedSomethingElseIs(TestContext context) {
+
+        Async async = context.async();
+
+        doKafkaRollingUpdate(Collections.singletonList("* * 8-10 * * ?"),
+            () -> Date.from(LocalDateTime.of(2018, 11, 26, 11, 00, 0).atZone(ZoneId.of("GMT")).toInstant()),
+            r -> {
+                String generation = getClusterCaGenerationPod(KafkaCluster.kafkaPodName(NAME, 0));
+                context.assertEquals("1", generation, "Pod had unexpected generation " + generation);
+                async.complete();
+            }, true, true);
+
+        async.await();
+    }
+
+    @Test
+    public void testKafkaRollingUpdateMaintenanceNotSatisfiedCertChangedSomethingElseIsNot(TestContext context) {
+
+        Async async = context.async();
+
+        doKafkaRollingUpdate(Collections.singletonList("* * 8-10 * * ?"),
+            () -> Date.from(LocalDateTime.of(2018, 11, 26, 11, 00, 0).atZone(ZoneId.of("GMT")).toInstant()),
+            r -> {
+                String generation = getClusterCaGenerationPod(KafkaCluster.kafkaPodName(NAME, 0));
+                context.assertEquals("0", generation, "Pod had unexpected generation " + generation);
+                async.complete();
+            }, true, false);
+
+        async.await();
+    }
+
+    @Test
+    public void testKafkaRollingUpdateMaintenanceSatisfiedCertChangedSomethingElseIsNot(TestContext context) {
+
+        Async async = context.async();
+
+        doKafkaRollingUpdate(Collections.singletonList("* * 8-10 * * ?"),
+            () -> Date.from(LocalDateTime.of(2018, 11, 26, 9, 00, 0).atZone(ZoneId.of("GMT")).toInstant()),
+            r -> {
+                String generation = getClusterCaGenerationPod(KafkaCluster.kafkaPodName(NAME, 0));
+                context.assertEquals("1", generation, "Pod had unexpected generation " + generation);
+                async.complete();
+            }, true, false);
+
+        async.await();
     }
 }

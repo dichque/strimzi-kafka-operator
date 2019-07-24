@@ -33,14 +33,14 @@ public class Session extends AbstractVerticle {
     private final Config config;
     private final KubernetesClient kubeClient;
 
-    OperatorAssignedKafkaImpl kafka;
-    AdminClient adminClient;
-    K8sImpl k8s;
-    TopicOperator topicOperator;
-    Watch topicWatch;
-    ZkTopicsWatcher topicsWatcher;
-    TopicConfigsWatcher topicConfigsWatcher;
-    ZkTopicWatcher topicWatcher;
+    /*test*/ OperatorAssignedKafkaImpl kafka;
+    private AdminClient adminClient;
+    /*test*/ K8sImpl k8s;
+    /*test*/ TopicOperator topicOperator;
+    /*test*/ Watch topicWatch;
+    /*test*/ ZkTopicsWatcher topicsWatcher;
+    /*test*/ TopicConfigsWatcher topicConfigsWatcher;
+    /*test*/ ZkTopicWatcher topicWatcher;
     /** The id of the periodic reconciliation timer. This is null during a periodic reconciliation. */
     private volatile Long timerId;
     private volatile boolean stopped = false;
@@ -68,44 +68,52 @@ public class Session extends AbstractVerticle {
             vertx.cancelTimer(timerId);
         }
         vertx.executeBlocking(blockingResult -> {
-            long t0 = System.currentTimeMillis();
             long timeout = 120_000L;
+            long deadline = System.currentTimeMillis() + timeout;
             LOGGER.info("Stopping");
             LOGGER.debug("Stopping kube watch");
             topicWatch.close();
             LOGGER.debug("Stopping zk watches");
             topicsWatcher.stop();
 
-            while (topicOperator.isWorkInflight()) {
-                if (System.currentTimeMillis() - t0 > timeout) {
-                    LOGGER.error("Timeout waiting for inflight work to finish");
-                    break;
+            Future f = Future.future();
+            Handler<Long> longHandler = new Handler<Long>() {
+                @Override
+                public void handle(Long inflightTimerId) {
+                    if (!topicOperator.isWorkInflight()) {
+                        LOGGER.error("Inflight work has finished");
+                        f.complete();
+                    } else if (System.currentTimeMillis() > deadline) {
+                        LOGGER.error("Timeout waiting for inflight work to finish");
+                        f.complete();
+                    } else {
+                        LOGGER.debug("Waiting for inflight work to finish");
+                        vertx.setTimer(1_000, this);
+                    }
                 }
-                LOGGER.debug("Waiting for inflight work to finish");
-                try {
-                    Thread.sleep(1_000);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-            }
-            LOGGER.debug("Stopping kafka {}", kafka);
-            kafka.stop();
+            };
+            longHandler.handle(null);
+            f.compose(ignored -> {
+                LOGGER.debug("Stopping kafka {}", kafka);
+                kafka.stop();
 
-            LOGGER.debug("Disconnecting from zookeeper {}", zk);
-            zk.disconnect(zkResult -> {
-                if (zkResult.failed()) {
-                    LOGGER.warn("Error disconnecting from zookeeper: {}", String.valueOf(zkResult.cause()));
-                }
-                LOGGER.debug("Closing AdminClient {}", adminClient);
-                adminClient.close(timeout - (System.currentTimeMillis() - t0), TimeUnit.MILLISECONDS);
+                LOGGER.debug("Disconnecting from zookeeper {}", zk);
+                zk.disconnect(zkResult -> {
+                    if (zkResult.failed()) {
+                        LOGGER.warn("Error disconnecting from zookeeper: {}", String.valueOf(zkResult.cause()));
+                    }
+                    LOGGER.debug("Closing AdminClient {}", adminClient);
+                    adminClient.close(deadline - System.currentTimeMillis(), TimeUnit.MILLISECONDS);
 
-                HttpServer healthServer = this.healthServer;
-                if (healthServer != null) {
-                    healthServer.close();
-                }
+                    HttpServer healthServer = this.healthServer;
+                    if (healthServer != null) {
+                        healthServer.close();
+                    }
 
-                LOGGER.info("Stopped");
-                blockingResult.complete();
+                    LOGGER.info("Stopped");
+                    blockingResult.complete();
+                });
+                return Future.succeededFuture();
             });
         }, stopFuture);
     }
@@ -157,7 +165,8 @@ public class Session extends AbstractVerticle {
 
         Thread resourceThread = new Thread(() -> {
             LOGGER.debug("Watching KafkaTopics matching {}", resourcePredicate);
-            Session.this.topicWatch = kubeClient.customResources(Crds.topic(), KafkaTopic.class, KafkaTopicList.class, DoneableKafkaTopic.class).inNamespace(namespace).watch(new K8sTopicWatcher(topicOperator, resourcePredicate));
+            Session.this.topicWatch = kubeClient.customResources(Crds.topic(), KafkaTopic.class, KafkaTopicList.class, DoneableKafkaTopic.class)
+                    .inNamespace(namespace).watch(new K8sTopicWatcher(topicOperator, resourcePredicate));
             LOGGER.debug("Watching setup");
 
             // start the HTTP server for healthchecks

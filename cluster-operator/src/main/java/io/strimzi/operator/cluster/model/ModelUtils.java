@@ -17,14 +17,19 @@ import io.fabric8.kubernetes.api.model.SecretBuilder;
 import io.fabric8.kubernetes.api.model.apps.StatefulSet;
 import io.strimzi.api.kafka.model.CertificateAuthority;
 import io.strimzi.api.kafka.model.CpuMemory;
+import io.strimzi.api.kafka.model.JbodStorage;
+import io.strimzi.api.kafka.model.PersistentClaimStorage;
 import io.strimzi.api.kafka.model.Resources;
+import io.strimzi.api.kafka.model.Storage;
 import io.strimzi.api.kafka.model.TlsSidecar;
 import io.strimzi.api.kafka.model.TlsSidecarLogLevel;
-import io.strimzi.certs.CertAndKey;
 import io.strimzi.api.kafka.model.template.PodDisruptionBudgetTemplate;
 import io.strimzi.api.kafka.model.template.PodTemplate;
+import io.strimzi.certs.CertAndKey;
 import io.strimzi.operator.cluster.KafkaUpgradeException;
 import io.strimzi.operator.common.model.Labels;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -36,9 +41,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.StringTokenizer;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-
 import static io.strimzi.api.kafka.model.Quantities.normalizeCpu;
 import static io.strimzi.api.kafka.model.Quantities.normalizeMemory;
 
@@ -46,6 +48,10 @@ public class ModelUtils {
     private ModelUtils() {}
 
     protected static final Logger log = LogManager.getLogger(ModelUtils.class.getName());
+
+    public static final String KUBERNETES_SERVICE_DNS_DOMAIN =
+            System.getenv().getOrDefault("KUBERNETES_SERVICE_DNS_DOMAIN", "cluster.local");
+
     /**
      * Find the first secret in the given secrets with the given name
      */
@@ -54,7 +60,7 @@ public class ModelUtils {
     }
 
     public static int getCertificateValidity(CertificateAuthority certificateAuthority) {
-        int validity = AbstractModel.CERTS_EXPIRATION_DAYS;
+        int validity = CertificateAuthority.DEFAULT_CERTS_VALIDITY_DAYS;
         if (certificateAuthority != null
                 && certificateAuthority.getValidityDays() > 0) {
             validity = certificateAuthority.getValidityDays();
@@ -63,7 +69,7 @@ public class ModelUtils {
     }
 
     public static int getRenewalDays(CertificateAuthority certificateAuthority) {
-        return certificateAuthority != null ? certificateAuthority.getRenewalDays() : 30;
+        return certificateAuthority != null ? certificateAuthority.getRenewalDays() : CertificateAuthority.DEFAULT_CERTS_RENEWAL_DAYS;
     }
 
     /**
@@ -198,13 +204,13 @@ public class ModelUtils {
                         tlsSidecar.getLogLevel() : TlsSidecarLogLevel.NOTICE).toValue());
     }
 
-    public static Secret buildSecret(ClusterCa clusterCa, Secret secret, String namespace, String secretName, String keyCertName, Labels labels, OwnerReference ownerReference) {
+    public static Secret buildSecret(ClusterCa clusterCa, Secret secret, String namespace, String secretName, String commonName, String keyCertName, Labels labels, OwnerReference ownerReference) {
         Map<String, String> data = new HashMap<>();
         if (secret == null || clusterCa.certRenewed()) {
             log.debug("Generating certificates");
             try {
                 log.debug(keyCertName + " certificate to generate");
-                CertAndKey eoCertAndKey = clusterCa.generateSignedCert(secretName, Ca.IO_STRIMZI);
+                CertAndKey eoCertAndKey = clusterCa.generateSignedCert(commonName, Ca.IO_STRIMZI);
                 data.put(keyCertName + ".key", eoCertAndKey.keyAsBase64String());
                 data.put(keyCertName + ".crt", eoCertAndKey.certAsBase64String());
             } catch (IOException e) {
@@ -274,5 +280,30 @@ public class ModelUtils {
             model.templateImagePullSecrets = pod.getImagePullSecrets();
             model.templateSecurityContext = pod.getSecurityContext();
         }
+    }
+
+    /**
+     * Returns whether the given {@code Storage} instance is a persistent claim one or
+     * a JBOD containing at least one persistent volume.
+     *
+     * @param storage the Storage instance to check
+     */
+    public static boolean containsPersistentStorage(Storage storage) {
+        boolean isPersistentClaimStorage = storage instanceof PersistentClaimStorage;
+
+        if (!isPersistentClaimStorage && storage instanceof JbodStorage) {
+            isPersistentClaimStorage |= ((JbodStorage) storage).getVolumes()
+                    .stream().anyMatch(volume -> volume instanceof PersistentClaimStorage);
+        }
+        return isPersistentClaimStorage;
+    }
+
+    /**
+     * Returns the prefix used for volumes and persistent volume claims
+     *
+     * @param id identification number of the persistent storage
+     */
+    public static String getVolumePrefix(Integer id) {
+        return id == null ? AbstractModel.VOLUME_NAME : AbstractModel.VOLUME_NAME + "-" + id;
     }
 }

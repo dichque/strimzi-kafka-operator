@@ -16,6 +16,7 @@ import io.strimzi.crdgenerator.annotations.Description;
 import io.strimzi.crdgenerator.annotations.KubeLink;
 import io.strimzi.crdgenerator.annotations.Minimum;
 import io.sundr.builder.annotations.Buildable;
+import lombok.EqualsAndHashCode;
 
 import java.io.Serializable;
 import java.util.HashMap;
@@ -37,6 +38,7 @@ import java.util.Map;
         "livenessProbe", "readinessProbe",
         "jvmOptions", "resources",
          "metrics", "logging", "tlsSidecar", "template"})
+@EqualsAndHashCode
 public class ZookeeperClusterSpec implements Serializable {
 
     private static final long serialVersionUID = 1L;
@@ -49,7 +51,7 @@ public class ZookeeperClusterSpec implements Serializable {
             System.getenv().getOrDefault("STRIMZI_DEFAULT_TLS_SIDECAR_ZOOKEEPER_IMAGE", "strimzi/zookeeper-stunnel:latest");
     public static final int DEFAULT_REPLICAS = 3;
 
-    protected Storage storage;
+    protected SingleVolumeStorage storage;
 
     private Map<String, Object> config = new HashMap<>(0);
 
@@ -62,7 +64,7 @@ public class ZookeeperClusterSpec implements Serializable {
     private Probe livenessProbe;
     private Probe readinessProbe;
     private JvmOptions jvmOptions;
-    private Map<String, Object> metrics = new HashMap<>(0);
+    private Map<String, Object> metrics;
     private Affinity affinity;
     private List<Toleration> tolerations;
     private ZookeeperClusterTemplate template;
@@ -80,11 +82,11 @@ public class ZookeeperClusterSpec implements Serializable {
 
     @Description("Storage configuration (disk). Cannot be updated.")
     @JsonProperty(required = true)
-    public Storage getStorage() {
+    public SingleVolumeStorage getStorage() {
         return storage;
     }
 
-    public void setStorage(Storage storage) {
+    public void setStorage(SingleVolumeStorage storage) {
         this.storage = storage;
     }
 

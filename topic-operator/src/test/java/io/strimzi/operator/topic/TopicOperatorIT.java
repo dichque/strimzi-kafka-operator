@@ -6,9 +6,12 @@ package io.strimzi.operator.topic;
 
 import io.debezium.kafka.KafkaCluster;
 import io.debezium.kafka.ZookeeperServer;
+import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
 import io.fabric8.kubernetes.api.model.Event;
+import io.fabric8.kubernetes.api.model.ObjectMeta;
 import io.fabric8.kubernetes.api.model.ObjectMetaBuilder;
-import io.fabric8.kubernetes.client.DefaultKubernetesClient;
+import io.fabric8.kubernetes.api.model.OwnerReference;
+import io.fabric8.kubernetes.api.model.OwnerReferenceBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientException;
 import io.fabric8.kubernetes.client.dsl.MixedOperation;
@@ -18,15 +21,15 @@ import io.strimzi.api.kafka.model.DoneableKafkaTopic;
 import io.strimzi.api.kafka.KafkaTopicList;
 import io.strimzi.api.kafka.model.KafkaTopic;
 import io.strimzi.api.kafka.model.KafkaTopicBuilder;
-import io.strimzi.test.Namespace;
+import io.strimzi.test.BaseITST;
 import io.strimzi.test.TestUtils;
-import io.strimzi.test.k8s.KubeClusterResource;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.ext.unit.Async;
 import io.vertx.ext.unit.TestContext;
 import io.vertx.ext.unit.junit.VertxUnitRunner;
 import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.admin.AlterConfigsResult;
 import org.apache.kafka.clients.admin.ConfigEntry;
 import org.apache.kafka.clients.admin.CreatePartitionsResult;
@@ -36,6 +39,7 @@ import org.apache.kafka.clients.admin.NewPartitions;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.common.config.ConfigResource;
 import org.apache.kafka.common.errors.InvalidReplicationFactorException;
+import org.apache.kafka.common.errors.InvalidTopicException;
 import org.apache.kafka.common.errors.UnknownTopicOrPartitionException;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -43,7 +47,6 @@ import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
-import org.junit.ClassRule;
 import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -54,9 +57,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.function.BooleanSupplier;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyMap;
@@ -66,14 +71,11 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
-@Namespace(TopicOperatorIT.NAMESPACE)
 @RunWith(VertxUnitRunner.class)
-public class TopicOperatorIT {
+public class TopicOperatorIT extends BaseITST {
 
     private static final Logger LOGGER = LogManager.getLogger(TopicOperatorIT.class);
 
-    @ClassRule
-    public static KubeClusterResource testCluster = new KubeClusterResource();
     private static String oldNamespace;
 
     private final LabelPredicate resourcePredicate = LabelPredicate.fromString(
@@ -94,7 +96,7 @@ public class TopicOperatorIT {
             }
         }
     };
-    private final long timeout = 120_000L;
+    private final long timeout = 30_000L;
     private volatile TopicConfigsWatcher topicsConfigWatcher;
     private volatile ZkTopicWatcher topicWatcher;
 
@@ -105,10 +107,10 @@ public class TopicOperatorIT {
 
     @BeforeClass
     public static void setupKubeCluster() {
-        testCluster.client().clientWithAdmin()
+        CLUSTER.client().clientWithAdmin()
                 .createNamespace(NAMESPACE);
-        oldNamespace = testCluster.client().namespace(NAMESPACE);
-        testCluster.client().clientWithAdmin()
+        oldNamespace = CLUSTER.client().namespace(NAMESPACE);
+        CLUSTER.client().clientWithAdmin()
                 .create("../install/topic-operator/02-Role-strimzi-topic-operator.yaml")
                 .create(TestUtils.CRD_TOPIC)
                 .create("src/test/resources/TopicOperatorIT-rbac.yaml");
@@ -116,17 +118,18 @@ public class TopicOperatorIT {
 
     @AfterClass
     public static void teardownKubeCluster() {
-        testCluster.client().clientWithAdmin()
+        CLUSTER.client().clientWithAdmin()
                 .delete("src/test/resources/TopicOperatorIT-rbac.yaml")
                 .delete(TestUtils.CRD_TOPIC)
                 .delete("../install/topic-operator/02-Role-strimzi-topic-operator.yaml")
                 .deleteNamespace(NAMESPACE);
-        testCluster.client().clientWithAdmin().namespace(oldNamespace);
+        CLUSTER.client().clientWithAdmin().namespace(oldNamespace);
     }
 
     @Before
     public void setup(TestContext context) throws Exception {
         LOGGER.info("Setting up test");
+        CLUSTER.before();
         Runtime.getRuntime().addShutdownHook(kafkaHook);
         kafkaCluster = new KafkaCluster();
         kafkaCluster.addBrokers(1);
@@ -135,9 +138,27 @@ public class TopicOperatorIT {
         kafkaCluster.usingDirectory(Files.createTempDirectory("operator-integration-test").toFile());
         kafkaCluster.startup();
 
-        kubeClient = new DefaultKubernetesClient().inNamespace(NAMESPACE);
+        Properties p = new Properties();
+        p.setProperty(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaCluster.brokerList());
+        adminClient = AdminClient.create(p);
+
+        kubeClient = CLIENT.inNamespace(NAMESPACE);
         Crds.registerCustomKinds();
         LOGGER.info("Using namespace {}", NAMESPACE);
+        startTopicOperator(context);
+
+        // We can't delete events, so record the events which exist at the start of the test
+        // and then waitForEvents() can ignore those
+        preExistingEvents = kubeClient.events().inNamespace(NAMESPACE).withLabels(resourcePredicate.labels()).list().
+                getItems().stream().
+                map(evt -> evt.getMetadata().getUid()).
+                collect(Collectors.toSet());
+
+        LOGGER.info("Finished setting up test");
+    }
+
+    void startTopicOperator(TestContext context) {
+        LOGGER.info("Starting Topic Operator");
         Map<String, String> m = new HashMap();
         m.put(Config.KAFKA_BOOTSTRAP_SERVERS.key, kafkaCluster.brokerList());
         m.put(Config.ZOOKEEPER_CONNECT.key, "localhost:" + zkPort(kafkaCluster));
@@ -149,7 +170,6 @@ public class TopicOperatorIT {
         vertx.deployVerticle(session, ar -> {
             if (ar.succeeded()) {
                 deploymentId = ar.result();
-                adminClient = session.adminClient;
                 topicsConfigWatcher = session.topicConfigsWatcher;
                 topicWatcher = session.topicWatcher;
                 topicsWatcher = session.topicsWatcher;
@@ -160,19 +180,10 @@ public class TopicOperatorIT {
             }
         });
         async.await();
-
-        waitFor(context, () -> this.topicsWatcher.started(), timeout, "Topics watcher not started");
+        waitFor(context, () -> this.topicWatcher.started(), timeout, "Topic watcher not started");
         waitFor(context, () -> this.topicsConfigWatcher.started(), timeout, "Topic configs watcher not started");
         waitFor(context, () -> this.topicWatcher.started(), timeout, "Topic watcher not started");
-
-        // We can't delete events, so record the events which exist at the start of the test
-        // and then waitForEvents() can ignore those
-        preExistingEvents = kubeClient.events().inNamespace(NAMESPACE).withLabels(resourcePredicate.labels()).list().
-                getItems().stream().
-                map(evt -> evt.getMetadata().getUid()).
-                collect(Collectors.toSet());
-
-        LOGGER.info("Finished setting up test");
+        LOGGER.info("Started Topic Operator");
     }
 
     private static int zkPort(KafkaCluster cluster) {
@@ -192,14 +203,30 @@ public class TopicOperatorIT {
         LOGGER.info("Tearing down test");
 
         if (kubeClient != null) {
+            List<KafkaTopic> items = operation().inNamespace(NAMESPACE).list().getItems();
             operation().inNamespace(NAMESPACE).delete();
+            // Wait for the operator to delete all the existing topics in Kafka
+            for (KafkaTopic item : items) {
+                waitForTopicInKafka(context, new TopicName(item).toString(), false);
+            }
         }
 
+        stopTopicOperator(context);
+
+        adminClient.close();
+        if (kafkaCluster != null) {
+            kafkaCluster.shutdown();
+        }
+        Runtime.getRuntime().removeShutdownHook(kafkaHook);
+        LOGGER.info("Finished tearing down test");
+    }
+
+    void stopTopicOperator(TestContext context) {
+        LOGGER.info("Stopping Topic Operator");
         Async async = context.async();
         if (deploymentId != null) {
             vertx.undeploy(deploymentId, ar -> {
                 deploymentId = null;
-                adminClient = null;
                 topicsConfigWatcher = null;
                 topicWatcher = null;
                 topicsWatcher = null;
@@ -211,11 +238,7 @@ public class TopicOperatorIT {
             });
         }
         async.await();
-        if (kafkaCluster != null) {
-            kafkaCluster.shutdown();
-        }
-        Runtime.getRuntime().removeShutdownHook(kafkaHook);
-        LOGGER.info("Finished tearing down test");
+        LOGGER.info("Stopped Topic Operator");
     }
 
 
@@ -225,20 +248,7 @@ public class TopicOperatorIT {
         operation().inNamespace(NAMESPACE).create(topicResource);
 
         // Wait for the topic to be created
-        waitFor(context, () -> {
-            try {
-                adminClient.describeTopics(singletonList(topicName)).values().get(topicName).get();
-                return true;
-            } catch (ExecutionException e) {
-                if (e.getCause() instanceof UnknownTopicOrPartitionException) {
-                    return false;
-                } else {
-                    throw new RuntimeException(e);
-                }
-            } catch (InterruptedException e) {
-                throw new RuntimeException(e);
-            }
-        }, timeout, "Expected topic to be created by now");
+        waitForTopicInKafka(context, topicName);
         return topicResource;
     }
 
@@ -251,38 +261,58 @@ public class TopicOperatorIT {
     private String createTopic(TestContext context, String topicName) throws InterruptedException, ExecutionException {
         LOGGER.info("Creating topic {}", topicName);
         // Create a topic
-        String resourceName = new TopicName(topicName).asMapName().toString();
+        String resourceName = new TopicName(topicName).asKubeName().toString();
         CreateTopicsResult crt = adminClient.createTopics(singletonList(new NewTopic(topicName, 1, (short) 1)));
         crt.all().get();
 
         // Wait for the resource to be created
-        waitFor(context, () -> {
-            KafkaTopic topic = operation().inNamespace(NAMESPACE).withName(resourceName).get();
-            LOGGER.info("Polled topic {} waiting for creation", resourceName);
-            return topic != null;
-        }, timeout, "Expected the topic to have been created by now");
+        waitForTopicInKube(context, resourceName);
 
         LOGGER.info("topic {} has been created", resourceName);
         return resourceName;
     }
 
-    private void alterTopicConfig(TestContext context, String topicName, String resourceName) throws InterruptedException, ExecutionException {
+    private void waitForTopicInKube(TestContext context, String resourceName) {
+        waitForTopicInKube(context, resourceName, true);
+    }
+
+    private void waitForTopicInKube(TestContext context, String resourceName, boolean exist) {
+        waitFor(context, () -> {
+            KafkaTopic topic = operation().inNamespace(NAMESPACE).withName(resourceName).get();
+            LOGGER.info("Polled topic {} waiting for " + (exist ? "existence" : "non-existence"), resourceName);
+            return topic != null == exist;
+        }, timeout, "Expected the KafkaTopic '" + resourceName + "' to " + (exist ? "exist" : "not exist") + " in Kubernetes by now");
+    }
+
+    private void alterTopicConfigInKafkaAndAwaitReconciliation(TestContext context, String topicName, String resourceName) throws InterruptedException, ExecutionException {
+        String key = "compression.type";
+        final String changedValue = alterTopicConfigInKafka(topicName, key,
+            value -> "snappy".equals(value) ? "lz4" : "snappy");
+        awaitTopicConfigInKube(context, resourceName, key, changedValue);
+    }
+
+    private void awaitTopicConfigInKube(TestContext context, String resourceName, String key, String expectedValue) {
+
+        // Wait for the resource to be modified
+        waitFor(context, () -> {
+            KafkaTopic topic = operation().inNamespace(NAMESPACE).withName(resourceName).get();
+            LOGGER.info("Polled topic {}, waiting for config change", resourceName);
+            String gotValue = TopicSerialization.fromTopicResource(topic).getConfig().get(key);
+            LOGGER.info("Expecting value {}, got value {}", expectedValue, gotValue);
+            return expectedValue.equals(gotValue);
+        }, timeout, "Expected the config of topic " + resourceName + " to have " + key + "=" + expectedValue + " in Kube by now");
+    }
+
+    private String alterTopicConfigInKafka(String topicName, String key, Function<String, String> mutator) throws InterruptedException, ExecutionException {
         // Get the topic config
         ConfigResource configResource = topicConfigResource(topicName);
         org.apache.kafka.clients.admin.Config config = getTopicConfig(configResource);
-
-        String key = "compression.type";
 
         Map<String, ConfigEntry> m = new HashMap<>();
         for (ConfigEntry entry: config.entries()) {
             m.put(entry.name(), entry);
         }
-        final String changedValue;
-        if ("snappy".equals(m.get(key).value())) {
-            changedValue = "lz4";
-        } else {
-            changedValue = "snappy";
-        }
+        final String changedValue = mutator.apply(m.get(key).value());
         m.put(key, new ConfigEntry(key, changedValue));
         LOGGER.info("Changing topic config {} to {}", key, changedValue);
 
@@ -290,15 +320,7 @@ public class TopicOperatorIT {
         AlterConfigsResult cgf = adminClient.alterConfigs(singletonMap(configResource,
                 new org.apache.kafka.clients.admin.Config(m.values())));
         cgf.all().get();
-
-        // Wait for the resource to be modified
-        waitFor(context, () -> {
-            KafkaTopic topic = operation().inNamespace(NAMESPACE).withName(resourceName).get();
-            LOGGER.info("Polled topic {}, waiting for config change", resourceName);
-            String gotValue = TopicSerialization.fromTopicResource(topic).getConfig().get(key);
-            LOGGER.info("Got value {}", gotValue);
-            return changedValue.equals(gotValue);
-        }, timeout, "Expected the topic to have been deleted by now");
+        return changedValue;
     }
 
     private void alterTopicNumPartitions(TestContext context, String topicName, String resourceName) throws InterruptedException, ExecutionException {
@@ -316,9 +338,9 @@ public class TopicOperatorIT {
             KafkaTopic topic = operation().inNamespace(NAMESPACE).withName(resourceName).get();
             LOGGER.info("Polled topic {}, waiting for partitions change", resourceName);
             int gotValue = TopicSerialization.fromTopicResource(topic).getNumPartitions();
-            LOGGER.info("Got value {}", gotValue);
+            LOGGER.info("Expected value {}, got value {}", changedValue, gotValue);
             return changedValue == gotValue;
-        }, timeout, "Expected the topic to have been deleted by now");
+        }, timeout, "Expected the topic " + topicName + "to have " + changedValue + " partitions by now");
     }
 
     private org.apache.kafka.clients.admin.Config getTopicConfig(ConfigResource configResource) {
@@ -337,27 +359,31 @@ public class TopicOperatorIT {
 
     private void createAndAlterTopicConfig(TestContext context, String topicName) throws InterruptedException, ExecutionException {
         String resourceName = createTopic(context, topicName);
-        alterTopicConfig(context, topicName, resourceName);
+        alterTopicConfigInKafkaAndAwaitReconciliation(context, topicName, resourceName);
     }
 
-    private void deleteTopic(TestContext context, String topicName, String resourceName) throws InterruptedException, ExecutionException {
-        LOGGER.info("Deleting topic {} (KafkaTopic {})", topicName, resourceName);
-        // Now we can delete the topic
-        DeleteTopicsResult dlt = adminClient.deleteTopics(singletonList(topicName));
-        dlt.all().get();
-        LOGGER.info("Deleted topic {}", topicName);
+    private void deleteTopicInKafkaAndAwaitReconciliation(TestContext context, String topicName, String resourceName) throws InterruptedException, ExecutionException {
+        deleteTopicInKafka(topicName, resourceName);
 
         // Wait for the resource to be deleted
         waitFor(context, () -> {
             KafkaTopic topic = operation().inNamespace(NAMESPACE).withName(resourceName).get();
             LOGGER.info("Polled topic {}, got {}, waiting for deletion", resourceName, topic);
             return topic == null;
-        }, timeout, "Expected the topic to have been deleted by now");
+        }, timeout, "Expected the topic " + topicName + " to have been deleted by now");
+    }
+
+    private void deleteTopicInKafka(String topicName, String resourceName) throws InterruptedException, ExecutionException {
+        LOGGER.info("Deleting topic {} (KafkaTopic {})", topicName, resourceName);
+        // Now we can delete the topic
+        DeleteTopicsResult dlt = adminClient.deleteTopics(singletonList(topicName));
+        dlt.all().get();
+        LOGGER.info("Deleted topic {}", topicName);
     }
 
     private void createAndDeleteTopic(TestContext context, String topicName) throws InterruptedException, ExecutionException {
         String resourceName = createTopic(context, topicName);
-        deleteTopic(context, topicName, resourceName);
+        deleteTopicInKafkaAndAwaitReconciliation(context, topicName, resourceName);
     }
 
     private void createAndAlterNumPartitions(TestContext context, String topicName) throws InterruptedException, ExecutionException {
@@ -392,10 +418,9 @@ public class TopicOperatorIT {
                 context.fail(message);
             }
         });
-        async.await(timeout);
-        if (fut.failed()) {
-            context.fail(fut.cause());
-        }
+
+        async.awaitSuccess();
+
     }
 
     private void waitForEvent(TestContext context, KafkaTopic kafkaTopic, String expectedMessage, TopicOperator.EventType expectedType) {
@@ -414,6 +439,7 @@ public class TopicOperatorIT {
                 assertEquals(expectedMessage, event.getMessage());
                 assertEquals(expectedType.name, event.getType());
                 assertNotNull(event.getInvolvedObject());
+                assertNotNull(event.getLastTimestamp());
                 assertEquals("KafkaTopic", event.getInvolvedObject().getKind());
                 assertEquals(kafkaTopic.getMetadata().getName(), event.getInvolvedObject().getName());
                 return true;
@@ -506,9 +532,12 @@ public class TopicOperatorIT {
         // create the Topic Resource
         String topicName = "test-kafkatopic-deleted";
         KafkaTopic topicResource = createKafkaTopicResource(context, topicName);
+        deleteInKubeAndAwaitReconciliation(context, topicName, topicResource);
 
-        // can now delete the topicResource
-        operation().inNamespace(NAMESPACE).withName(topicResource.getMetadata().getName()).delete();
+    }
+
+    void deleteInKubeAndAwaitReconciliation(TestContext context, String topicName, KafkaTopic topicResource) {
+        deleteInKube(topicResource.getMetadata().getName());
 
         // Wait for the topic to be deleted
         waitFor(context, () -> {
@@ -516,7 +545,8 @@ public class TopicOperatorIT {
                 adminClient.describeTopics(singletonList(topicName)).values().get(topicName).get();
                 return false;
             } catch (ExecutionException e) {
-                if (e.getCause() instanceof UnknownTopicOrPartitionException) {
+                if (e.getCause() instanceof UnknownTopicOrPartitionException
+                        || e.getCause() instanceof InvalidTopicException) {
                     return true;
                 } else {
                     throw new RuntimeException(e);
@@ -525,7 +555,11 @@ public class TopicOperatorIT {
                 throw new RuntimeException(e);
             }
         }, timeout, "Expected topic to be deleted by now");
+    }
 
+    private void deleteInKube(String resourceName) {
+        // can now delete the topicResource
+        operation().inNamespace(NAMESPACE).withName(resourceName).delete();
     }
 
 
@@ -534,20 +568,31 @@ public class TopicOperatorIT {
         // create the topic
         String topicName = "test-kafkatopic-modified-retention-changed";
         KafkaTopic topicResource = createKafkaTopicResource(context, topicName);
+        String expectedValue = alterTopicConfigInKube(topicResource.getMetadata().getName(),
+                "retention.ms", currentValue -> Integer.toString(Integer.parseInt(currentValue) + 1));
+        awaitTopicConfigInKafka(context, topicName, "retention.ms", expectedValue);
+    }
 
-        // now change the topic resource
-        KafkaTopic changedTopic = new KafkaTopicBuilder(operation().inNamespace(NAMESPACE).withName(topicResource.getMetadata().getName()).get())
-            .editOrNewSpec().addToConfig("retention.ms", 12341234).endSpec().build();
-        operation().inNamespace(NAMESPACE).withName(topicResource.getMetadata().getName()).replace(changedTopic);
-
+    void awaitTopicConfigInKafka(TestContext context, String topicName, String key, String expectedValue) {
         // Wait for that to be reflected in the kafka topic
         waitFor(context, () -> {
             ConfigResource configResource = topicConfigResource(topicName);
             org.apache.kafka.clients.admin.Config config = getTopicConfig(configResource);
             String retention = config.get("retention.ms").value();
             LOGGER.debug("retention of {}, waiting for 12341234", retention);
-            return "12341234".equals(retention);
-        },  timeout, "Expected the topic to be updated");
+            return expectedValue.equals(retention);
+        },  timeout, "Expected the topic " + topicName + " to have retention.ms=" + expectedValue + " in Kafka");
+    }
+
+    String alterTopicConfigInKube(String resourceName, String key, Function<String, String> mutator) {
+        // now change the topic resource
+        Object retention = operation().inNamespace(NAMESPACE).withName(resourceName).get().getSpec().getConfig().getOrDefault(key, "12341233");
+        String currentValue = retention instanceof Integer ? retention.toString() : (String) retention;
+        String newValue = mutator.apply(currentValue);
+        KafkaTopic changedTopic = new KafkaTopicBuilder(operation().inNamespace(NAMESPACE).withName(resourceName).get())
+            .editOrNewSpec().addToConfig(key, newValue).endSpec().build();
+        operation().inNamespace(NAMESPACE).withName(resourceName).replace(changedTopic);
+        return newValue;
     }
 
     @Test
@@ -635,23 +680,197 @@ public class TopicOperatorIT {
         session.topicOperator.reconcileAllTopics("periodic");
 
         // Wait for the topic to be created
+        waitForTopicInKafka(context, topicName);
+    }
+
+    void waitForTopicInKafka(TestContext context, String topicName) {
+        waitForTopicInKafka(context, topicName, true);
+    }
+
+    void waitForTopicInKafka(TestContext context, String topicName, boolean exist) {
         waitFor(context, () -> {
             try {
                 adminClient.describeTopics(singletonList(topicName)).values().get(topicName).get();
-                return true;
+                return exist;
             } catch (ExecutionException e) {
-                if (e.getCause() instanceof UnknownTopicOrPartitionException) {
-                    return false;
+                if (e.getCause() instanceof UnknownTopicOrPartitionException
+                        || e.getCause() instanceof InvalidTopicException) {
+                    return !exist;
                 } else {
                     throw new RuntimeException(e);
                 }
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);
             }
-        }, timeout, "Expected topic to be created by now");
+        }, timeout, "Expected topic '" + topicName + "' to " + (exist ? "exist" : "not exist") + " in Kafka by now");
     }
 
     // TODO: What happens if we create and then change labels to the resource predicate isn't matched any more
     //       What then happens if we change labels back?
+
+
+    @Test
+    public void testKafkaTopicWithOwnerRef(TestContext context) {
+        String topicName = "test-kafka-topic-with-owner-ref-1";
+
+        // this CM is created to be the owner of the KafkaTopic we're about to create.
+        String cmName = "hodor";
+        HashMap<String, String> cmData = new HashMap<>();
+        cmData.put("strimzi", "rulez");
+        kubeClient.configMaps().inNamespace(NAMESPACE).create(new ConfigMapBuilder().withNewMetadata().withName(cmName)
+                .withNamespace(NAMESPACE).endMetadata().withApiVersion("v1").withData(cmData).build());
+        String uid = kubeClient.configMaps().inNamespace(NAMESPACE).withName(cmName).get().getMetadata().getUid();
+
+        ObjectMeta metadata = new ObjectMeta();
+        OwnerReference or = new OwnerReferenceBuilder().withName(cmName)
+                .withApiVersion("v1")
+                .withController(false)
+                .withBlockOwnerDeletion(false)
+                .withUid(uid)
+                .withKind("ConfigMap")
+                .build();
+
+        metadata.getOwnerReferences().add(or);
+        Map<String, String> annos = new HashMap<>();
+        annos.put("iam", "groot");
+        Map<String, String> lbls = new HashMap<>();
+        lbls.put("iam", "root");
+        metadata.setAnnotations(annos);
+        metadata.setLabels(lbls);
+
+        // create topic and test OR, labels, annotations
+        Topic topic = new Topic.Builder(topicName, 1, (short) 1, emptyMap(), metadata).build();
+        KafkaTopic topicResource = TopicSerialization.toTopicResource(topic, resourcePredicate);
+        createKafkaTopicResource(context, topicResource);
+        assertEquals(1, operation().inNamespace(NAMESPACE).withName(topicName).get().getMetadata().getOwnerReferences().size());
+        assertEquals(uid, operation().inNamespace(NAMESPACE).withName(topicName).get().getMetadata().getOwnerReferences().get(0).getUid());
+        assertEquals(1, operation().inNamespace(NAMESPACE).withName(topicName).get().getMetadata().getAnnotations().size());
+        assertEquals("groot", operation().inNamespace(NAMESPACE).withName(topicName).get().getMetadata().getAnnotations().get("iam"));
+        assertEquals(2, operation().inNamespace(NAMESPACE).withName(topicName).get().getMetadata().getLabels().size());
+        assertEquals("root", operation().inNamespace(NAMESPACE).withName(topicName).get().getMetadata().getLabels().get("iam"));
+
+        // edit kafka topic
+        topicName = "test-kafka-topic-with-owner-ref-2";
+        Topic topic2 = new Topic.Builder(topicName, 1, (short) 1, emptyMap(), metadata).build();
+        KafkaTopic topicResource2 = TopicSerialization.toTopicResource(topic2, resourcePredicate);
+        topicResource = TopicSerialization.toTopicResource(topic2, resourcePredicate);
+        topicResource.getMetadata().getAnnotations().put("han", "solo");
+        createKafkaTopicResource(context, topicResource2);
+        assertEquals(uid, operation().inNamespace(NAMESPACE).withName(topicName).get().getMetadata().getOwnerReferences().get(0).getUid());
+        assertEquals(2, operation().inNamespace(NAMESPACE).withName(topicName).get().getMetadata().getAnnotations().size());
+        assertEquals("groot", operation().inNamespace(NAMESPACE).withName(topicName).get().getMetadata().getAnnotations().get("iam"));
+        assertEquals("solo", operation().inNamespace(NAMESPACE).withName(topicName).get().getMetadata().getAnnotations().get("han"));
+
+        // edit k8s topic
+        topicName = "test-kafka-topic-with-owner-ref-3";
+        Topic topic3 = new Topic.Builder(topicName, 1, (short) 1, emptyMap(), metadata).build();
+        topic3.getMetadata().getLabels().put("stan", "lee");
+        topicResource = TopicSerialization.toTopicResource(topic3, resourcePredicate);
+        createKafkaTopicResource(context, topicResource);
+        assertEquals(uid, operation().inNamespace(NAMESPACE).withName(topicName).get().getMetadata().getOwnerReferences().get(0).getUid());
+        assertEquals(3, operation().inNamespace(NAMESPACE).withName(topicName).get().getMetadata().getLabels().size());
+        assertEquals("lee", operation().inNamespace(NAMESPACE).withName(topicName).get().getMetadata().getLabels().get("stan"));
+        assertEquals("root", operation().inNamespace(NAMESPACE).withName(topicName).get().getMetadata().getLabels().get("iam"));
+    }
+
+    /**
+     * Validates that when TO starts it reconciles properly based on what's been previously observed
+     * 1. Create topic A in Kube and reconcile
+     * 2. Stop TO
+     * 3. Create topic X in Kafka, topic Y in Kube
+     * 4. Start TO
+     * 5. Verify topics A, X and Y exist on both sides
+     */
+    @Test
+    public void testReconciliationOnStartup(TestContext testContext) throws ExecutionException, InterruptedException {
+        // 1. Create topic A in Kube and reconcile
+        String topicNameZ = "topic-z";
+        {
+            Topic topicZ = new Topic.Builder(topicNameZ, 1, (short) 1, emptyMap()).build();
+            KafkaTopic topicResourceZ = TopicSerialization.toTopicResource(topicZ, resourcePredicate);
+            String resourceNameZ = topicResourceZ.getMetadata().getName();
+            operation().inNamespace(NAMESPACE).create(topicResourceZ);
+            waitForTopicInKafka(testContext, topicNameZ);
+        }
+
+        String topicNameA = "topic-a";
+        {
+            Topic topicA = new Topic.Builder(topicNameA, 1, (short) 1, emptyMap()).build();
+            KafkaTopic topicResourceA = TopicSerialization.toTopicResource(topicA, resourcePredicate);
+            String resourceNameA = topicResourceA.getMetadata().getName();
+            operation().inNamespace(NAMESPACE).create(topicResourceA);
+            waitForTopicInKafka(testContext, topicNameA);
+        }
+        String topicNameB = "topic-b";
+        String resourceNameB;
+        {
+            Topic topicB = new Topic.Builder(topicNameB, 1, (short) 1, emptyMap()).build();
+            KafkaTopic topicResourceB = TopicSerialization.toTopicResource(topicB, resourcePredicate);
+            resourceNameB = topicResourceB.getMetadata().getName();
+            operation().inNamespace(NAMESPACE).create(topicResourceB);
+            waitForTopicInKafka(testContext, topicNameB);
+        }
+        String topicNameC = "topic-c";
+        {
+            Topic topicC = new Topic.Builder(topicNameC, 1, (short) 1, emptyMap()).build();
+            KafkaTopic topicResourceC = TopicSerialization.toTopicResource(topicC, resourcePredicate);
+            String resourceNameC = topicResourceC.getMetadata().getName();
+            operation().inNamespace(NAMESPACE).create(topicResourceC);
+            waitForTopicInKafka(testContext, topicNameC);
+        }
+
+        // 2. Stop TO
+        stopTopicOperator(testContext);
+
+        // 3. Modify topic A in kubernetes and topic Z in Kafka
+        String alteredConfigA = alterTopicConfigInKafka(topicNameA,
+                "retention.ms", currentValue -> Integer.toString(Integer.parseInt(currentValue) + 1));
+        String alteredConfigZ = alterTopicConfigInKube(topicNameZ,
+                "retention.ms", currentValue -> Integer.toString(Integer.parseInt(currentValue) + 1));
+
+        // 3. Delete topic B in Kafka, delete topic C in Kubernetes
+        deleteTopicInKafka(topicNameB, resourceNameB);
+        deleteInKube(topicNameC);
+
+        // 3. Create topic X in Kafka, topic Y in Kubernetes
+        String topicNameX = "topic-x";
+        {
+            String resourceName = new TopicName(topicNameX).asKubeName().toString();
+            CreateTopicsResult crt = adminClient.createTopics(singletonList(new NewTopic(topicNameX, 1, (short) 1)));
+            crt.all().get();
+        }
+
+        String topicNameY = "topic-y";
+        {
+            Topic topicY = new Topic.Builder(topicNameY, 1, (short) 1, emptyMap()).build();
+            KafkaTopic topicResourceY = TopicSerialization.toTopicResource(topicY, resourcePredicate);
+            String resourceNameY = topicResourceY.getMetadata().getName();
+            operation().inNamespace(NAMESPACE).create(topicResourceY);
+        }
+
+        // 4. Start TO
+        startTopicOperator(testContext);
+
+        // 5. Verify topics A, X and Y exist on both sides
+        waitForTopicInKafka(testContext, topicNameA);
+        waitForTopicInKafka(testContext, topicNameX);
+        waitForTopicInKafka(testContext, topicNameY);
+        waitForTopicInKube(testContext, topicNameA);
+        waitForTopicInKube(testContext, topicNameX);
+        waitForTopicInKube(testContext, topicNameY);
+
+        // 5. Verify topics B and C deleted on both sides
+        waitForTopicInKube(testContext, topicNameB, false);
+        waitForTopicInKube(testContext, topicNameC, false);
+        waitForTopicInKafka(testContext, topicNameB, false);
+        waitForTopicInKafka(testContext, topicNameC, false);
+
+        // 5. Verify topics A and Z were changed.
+        awaitTopicConfigInKube(testContext, topicNameA, "retention.ms", alteredConfigA);
+        awaitTopicConfigInKube(testContext, topicNameZ, "retention.ms", alteredConfigZ);
+        awaitTopicConfigInKafka(testContext, topicNameA, "retention.ms", alteredConfigA);
+        awaitTopicConfigInKafka(testContext, topicNameZ, "retention.ms", alteredConfigZ);
+
+    }
 
 }

@@ -8,6 +8,7 @@ import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.fabric8.kubernetes.api.model.ObjectMeta;
 import io.fabric8.kubernetes.api.model.ObjectMetaBuilder;
 import io.strimzi.api.kafka.model.KafkaTopic;
 import io.strimzi.api.kafka.model.KafkaTopicBuilder;
@@ -87,7 +88,8 @@ public class TopicSerialization {
                 .withTopicName(getTopicName(kafkaTopic))
                 .withNumPartitions(getPartitions(kafkaTopic))
                 .withNumReplicas(getReplicas(kafkaTopic))
-                .withConfig(topicConfigFromTopicConfig(kafkaTopic));
+                .withConfig(topicConfigFromTopicConfig(kafkaTopic))
+                .withMetadata(kafkaTopic.getMetadata());
         return builder.build();
     }
 
@@ -126,19 +128,39 @@ public class TopicSerialization {
      * Create a resource to reflect the given Topic.
      */
     public static KafkaTopic toTopicResource(Topic topic, LabelPredicate resourcePredicate) {
-        ResourceName resourceName = topic.getOrAsMapName();
-        return new KafkaTopicBuilder().withApiVersion("v1")
-                    .withMetadata(new ObjectMetaBuilder()
+        ResourceName resourceName = topic.getOrAsKubeName();
+        ObjectMeta om = topic.getMetadata();
+        if (om != null) {
+            om.setName(resourceName.toString());
+            Map<String, String> lbls = new HashMap<>();
+            lbls.putAll(resourcePredicate.labels());
+            if (topic.getMetadata().getLabels() != null)
+                lbls.putAll(topic.getMetadata().getLabels());
+            om.setLabels(lbls);
+            om.setOwnerReferences(topic.getMetadata().getOwnerReferences());
+            om.setAnnotations(topic.getMetadata().getAnnotations());
+        } else {
+            om = new ObjectMetaBuilder()
                     .withName(resourceName.toString())
-                    .withLabels(resourcePredicate.labels()).build())
-                    // TODO .withUid()
+                    .withLabels(resourcePredicate.labels())
+                    .build();
+        }
+
+        KafkaTopic kt = new KafkaTopicBuilder().withApiVersion("v1")
+                .withMetadata(om)
+                // TODO .withUid()
                 .withNewSpec()
-                    .withTopicName(topic.getTopicName().toString())
-                    .withPartitions(topic.getNumPartitions())
-                    .withReplicas((int) topic.getNumReplicas())
-                    .withConfig(new LinkedHashMap<>(topic.getConfig()))
+                .withTopicName(topic.getTopicName().toString())
+                .withPartitions(topic.getNumPartitions())
+                .withReplicas((int) topic.getNumReplicas())
+                .withConfig(new LinkedHashMap<>(topic.getConfig()))
                 .endSpec()
-            .build();
+                .build();
+        // for some reason when the `topic.getMetadata().getAnnotations()` is null
+        // topic is created with annotations={} (empty map but should be null as well)
+        if (topic.getMetadata() != null)
+            kt.getMetadata().setAnnotations(topic.getMetadata().getAnnotations());
+        return kt;
     }
 
 
@@ -197,7 +219,8 @@ public class TopicSerialization {
         Topic.Builder builder = new Topic.Builder()
                 .withTopicName(meta.getDescription().name())
                 .withNumPartitions(meta.getDescription().partitions().size())
-                .withNumReplicas((short) meta.getDescription().partitions().get(0).replicas().size());
+                .withNumReplicas((short) meta.getDescription().partitions().get(0).replicas().size())
+                .withMetadata(null);
         for (ConfigEntry entry: meta.getConfig().entries()) {
             if (!entry.isDefault()) {
                 builder.withConfigEntry(entry.name(), entry.value());
@@ -214,7 +237,7 @@ public class TopicSerialization {
         ObjectMapper mapper = objectMapper();
         ObjectNode root = mapper.createObjectNode();
         // TODO Do we store the k8s uid here?
-        root.put(JSON_KEY_MAP_NAME, topic.getOrAsMapName().toString());
+        root.put(JSON_KEY_MAP_NAME, topic.getOrAsKubeName().toString());
         root.put(JSON_KEY_TOPIC_NAME, topic.getTopicName().toString());
         root.put(JSON_KEY_PARTITIONS, topic.getNumPartitions());
         root.put(JSON_KEY_REPLICAS, topic.getNumReplicas());

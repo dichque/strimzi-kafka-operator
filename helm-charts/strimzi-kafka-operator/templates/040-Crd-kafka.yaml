@@ -40,6 +40,9 @@ spec:
                       type: string
                     deleteClaim:
                       type: boolean
+                    id:
+                      type: integer
+                      minimum: 0
                     selector:
                       type: object
                     size:
@@ -49,6 +52,30 @@ spec:
                       enum:
                       - ephemeral
                       - persistent-claim
+                      - jbod
+                    volumes:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          class:
+                            type: string
+                          deleteClaim:
+                            type: boolean
+                          id:
+                            type: integer
+                            minimum: 0
+                          selector:
+                            type: object
+                          size:
+                            type: string
+                          type:
+                            type: string
+                            enum:
+                            - ephemeral
+                            - persistent-claim
+                        required:
+                        - type
                   required:
                   - type
                 listeners:
@@ -243,6 +270,29 @@ spec:
                                             type: string
                                   matchLabels:
                                     type: object
+                        overrides:
+                          type: object
+                          properties:
+                            bootstrap:
+                              type: object
+                              properties:
+                                address:
+                                  type: string
+                                nodePort:
+                                  type: integer
+                            brokers:
+                              type: array
+                              items:
+                                type: object
+                                properties:
+                                  broker:
+                                    type: integer
+                                  advertisedHost:
+                                    type: string
+                                  advertisedPort:
+                                    type: integer
+                                  nodePort:
+                                    type: integer
                         tls:
                           type: boolean
                         type:
@@ -786,6 +836,9 @@ spec:
                       type: string
                     deleteClaim:
                       type: boolean
+                    id:
+                      type: integer
+                      minimum: 0
                     selector:
                       type: object
                     size:
@@ -2037,6 +2090,11 @@ spec:
                 renewalDays:
                   type: integer
                   minimum: 1
+                certificateExpirationPolicy:
+                  type: string
+                  enum:
+                  - renew-certificate
+                  - replace-key
             clientsCa:
               type: object
               properties:
@@ -2048,6 +2106,11 @@ spec:
                 renewalDays:
                   type: integer
                   minimum: 1
+                certificateExpirationPolicy:
+                  type: string
+                  enum:
+                  - renew-certificate
+                  - replace-key
             maintenanceTimeWindows:
               type: array
               items:

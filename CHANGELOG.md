@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 0.11.0
+
+* Add support for JBOD storage for Kafka brokers
+* Allow users to configure the default ImagePullPolicy
+* Add Prometheus alerting
+    * Resources for alert manager deployment and configuration
+    * Alerting rules with alert examples from Kafka and Zookeeper metrics
+* Enrich configuration options for off cluster access
+* Support for watching all namespaces
+* Operator Lifecycle Manager integration
+
 ## 0.10.0
 
 * Support for Kafka 2.1.0

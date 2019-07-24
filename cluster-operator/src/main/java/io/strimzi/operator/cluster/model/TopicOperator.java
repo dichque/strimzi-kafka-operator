@@ -107,7 +107,6 @@ public class TopicOperator extends AbstractModel {
         this.ancillaryConfigName = metricAndLogConfigsName(cluster);
         this.logAndMetricsConfigVolumeName = "topic-operator-metrics-and-logging";
         this.logAndMetricsConfigMountPath = "/opt/topic-operator/custom-config/";
-        this.validLoggerFields = getDefaultLogConfig();
     }
 
 
@@ -199,11 +198,6 @@ public class TopicOperator extends AbstractModel {
         return cluster + io.strimzi.operator.cluster.model.TopicOperator.CERTS_SUFFIX;
     }
 
-    @Override
-    public String getGcLoggingOptions() {
-        return gcLoggingEnabled ? DEFAULT_STRIMZI_GC_LOGGING : " ";
-    }
-
     /**
      * Create a Topic Operator from given desired resource
      *
@@ -237,7 +231,7 @@ public class TopicOperator extends AbstractModel {
         return result;
     }
 
-    public Deployment generateDeployment(boolean isOpenShift) {
+    public Deployment generateDeployment(boolean isOpenShift, ImagePullPolicy imagePullPolicy) {
         DeploymentStrategy updateStrategy = new DeploymentStrategyBuilder()
                 .withType("Recreate")
                 .build();
@@ -247,14 +241,14 @@ public class TopicOperator extends AbstractModel {
                 Collections.emptyMap(),
                 Collections.emptyMap(),
                 getMergedAffinity(),
-                getInitContainers(),
-                getContainers(),
+                getInitContainers(imagePullPolicy),
+                getContainers(imagePullPolicy),
                 getVolumes(isOpenShift)
         );
     }
 
     @Override
-    protected List<Container> getContainers() {
+    protected List<Container> getContainers(ImagePullPolicy imagePullPolicy) {
         List<Container> containers = new ArrayList<>();
         Container container = new ContainerBuilder()
                 .withName(TOPIC_OPERATOR_NAME)
@@ -265,6 +259,7 @@ public class TopicOperator extends AbstractModel {
                 .withReadinessProbe(createHttpProbe(readinessPath + "ready", HEALTHCHECK_PORT_NAME, readinessInitialDelay, readinessTimeout))
                 .withResources(ModelUtils.resources(getResources()))
                 .withVolumeMounts(getVolumeMounts())
+                .withImagePullPolicy(determineImagePullPolicy(imagePullPolicy, getImage()))
                 .build();
 
         String tlsSidecarImage = TopicOperatorSpec.DEFAULT_TLS_SIDECAR_IMAGE;
@@ -282,6 +277,7 @@ public class TopicOperator extends AbstractModel {
                         buildEnvVar(ENV_VAR_ZOOKEEPER_CONNECT, zookeeperConnect)))
                 .withVolumeMounts(createVolumeMount(TLS_SIDECAR_EO_CERTS_VOLUME_NAME, TLS_SIDECAR_EO_CERTS_VOLUME_MOUNT),
                         createVolumeMount(TLS_SIDECAR_CA_CERTS_VOLUME_NAME, TLS_SIDECAR_CA_CERTS_VOLUME_MOUNT))
+                .withImagePullPolicy(determineImagePullPolicy(imagePullPolicy, tlsSidecarImage))
                 .build();
 
         containers.add(container);
@@ -301,7 +297,7 @@ public class TopicOperator extends AbstractModel {
         varList.add(buildEnvVar(ENV_VAR_ZOOKEEPER_SESSION_TIMEOUT_MS, Integer.toString(zookeeperSessionTimeoutMs)));
         varList.add(buildEnvVar(ENV_VAR_TOPIC_METADATA_MAX_ATTEMPTS, String.valueOf(topicMetadataMaxAttempts)));
         varList.add(buildEnvVar(ENV_VAR_TLS_ENABLED, Boolean.toString(true)));
-        varList.add(buildEnvVar(ENV_VAR_STRIMZI_GC_LOG_OPTS, getGcLoggingOptions()));
+        varList.add(buildEnvVar(ENV_VAR_STRIMZI_GC_LOG_ENABLED, String.valueOf(gcLoggingEnabled)));
 
         return varList;
     }
@@ -365,7 +361,8 @@ public class TopicOperator extends AbstractModel {
      */
     public Secret generateSecret(ClusterCa clusterCa) {
         Secret topicOperatorSecret = clusterCa.topicOperatorSecret();
-        return ModelUtils.buildSecret(clusterCa, topicOperatorSecret, namespace, TopicOperator.secretName(cluster), "entity-operator", labels, createOwnerReference());
+        // TO is using the keyCertName as "entity-operator". This is not typo.
+        return ModelUtils.buildSecret(clusterCa, topicOperatorSecret, namespace, TopicOperator.secretName(cluster), name, "entity-operator", labels, createOwnerReference());
     }
 
     protected void setTlsSidecar(TlsSidecar tlsSidecar) {

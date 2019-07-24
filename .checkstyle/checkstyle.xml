@@ -15,6 +15,8 @@
         <property name="fileExtensions" value="java"/>
     </module>
 
+    <module name="SuppressWarningsFilter" />
+
     <module name="TreeWalker">
 
         <!-- code cleanup -->
@@ -101,11 +103,11 @@
 
         <module name="ClassFanOutComplexity">
             <!-- default is 20 -->
-            <property name="max" value="43"/>
+            <property name="max" value="44"/>
         </module>
         <module name="CyclomaticComplexity">
             <!-- default is 10-->
-            <property name="max" value="18"/>
+            <property name="max" value="19"/>
         </module>
         <module name="JavaNCSS">
             <!-- default is 50 -->
@@ -119,10 +121,16 @@
         <module name="IllegalToken">
             <property name="tokens" value="LITERAL_ASSERT"/>
         </module>
+
+        <!-- Make the @SuppressWarnings annotations available to Checkstyle -->
+        <module name="SuppressWarningsHolder" />
     </module>
 
     <module name="SuppressionFilter">
         <property name="file" value="${checkstyle.suppressions.file}"/>
     </module>
+
+    <!-- Filter out Checkstyle warnings that have been suppressed with the @SuppressWarnings annotation -->
+    <module name="SuppressWarningsFilter" />
 </module>
 

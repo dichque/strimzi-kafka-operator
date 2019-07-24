@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.exc.InvalidFormatException;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import com.fasterxml.jackson.dataformat.yaml.YAMLGenerator;
 import com.fasterxml.jackson.dataformat.yaml.YAMLMapper;
 import org.apache.logging.log4j.LogManager;
@@ -49,8 +50,8 @@ import java.util.stream.Collector;
 import java.util.stream.Collectors;
 
 import static java.util.Arrays.asList;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assume.assumeTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 public final class TestUtils {
 
@@ -69,6 +70,9 @@ public final class TestUtils {
     public static final String CRD_KAFKA_USER = "../install/cluster-operator/044-Crd-kafkauser.yaml";
 
     public static final String CRD_KAFKA_MIRROR_MAKER = "../install/cluster-operator/045-Crd-kafkamirrormaker.yaml";
+
+    private static final Pattern KAFKA_COMPONENT_PATTERN = Pattern.compile(":([^:]*?)-kafka-([0-9.]+)$");
+    private static final Pattern VERSION_IMAGE_PATTERN = Pattern.compile("(?<version>[0-9.]+)=(?<image>[^\\s]*)");
 
     private TestUtils() {
         // All static methods
@@ -100,7 +104,12 @@ public final class TestUtils {
         LOGGER.debug("Waiting for {}", description);
         long deadline = System.currentTimeMillis() + timeoutMs;
         while (true) {
-            boolean result = ready.getAsBoolean();
+            boolean result;
+            try {
+                result = ready.getAsBoolean();
+            } catch (Exception e) {
+                result = false;
+            }
             long timeLeft = deadline - System.currentTimeMillis();
             if (result) {
                 return timeLeft;
@@ -141,8 +150,7 @@ public final class TestUtils {
 
     public static String changeOrgAndTag(String image, String newOrg, String newTag, String kafkaVersion) {
         image = image.replaceFirst("^strimzi/", newOrg + "/");
-        Pattern p = Pattern.compile(":([^:]*?)-kafka-([0-9.]+)$");
-        Matcher m = p.matcher(image);
+        Matcher m = KAFKA_COMPONENT_PATTERN.matcher(image);
         StringBuffer sb = new StringBuffer();
         if (m.find()) {
             m.appendReplacement(sb, ":" + newTag + "-kafka-" + kafkaVersion);
@@ -157,7 +165,7 @@ public final class TestUtils {
     public static String changeOrgAndTag(String image) {
         String strimziOrg = "strimzi";
         String strimziTag = "latest";
-        String kafkaVersion = "2.0.0";
+        String kafkaVersion = "2.1.0";
         String dockerOrg = System.getenv().getOrDefault("DOCKER_ORG", strimziOrg);
         String dockerTag = System.getenv().getOrDefault("DOCKER_TAG", strimziTag);
         kafkaVersion = System.getenv().getOrDefault("KAFKA_VERSION", kafkaVersion);
@@ -165,8 +173,7 @@ public final class TestUtils {
     }
 
     public static String changeOrgAndTagInImageMap(String imageMap) {
-        java.util.regex.Pattern p = java.util.regex.Pattern.compile("(?<version>[0-9.]+)=(?<image>[^\\s]*)");
-        Matcher m = p.matcher(imageMap);
+        Matcher m = VERSION_IMAGE_PATTERN.matcher(imageMap);
         StringBuffer sb = new StringBuffer();
         while (m.find()) {
             m.appendReplacement(sb, m.group("version") + "=" + TestUtils.changeOrgAndTag(m.group("image")));
@@ -294,6 +301,17 @@ public final class TestUtils {
         }
     }
 
+    public static <T> T configFromYaml(String yamlPath, Class<T> c) {
+        ObjectMapper mapper = new ObjectMapper(new YAMLFactory());
+        try {
+            return mapper.readValue(new File(yamlPath), c);
+        } catch (InvalidFormatException e) {
+            throw new IllegalArgumentException(e);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     /** @deprecated you should be using yaml, no json */
     @Deprecated
     public static <T> T fromJson(String json, Class<T> c) {
@@ -359,7 +377,7 @@ public final class TestUtils {
      * {@code strimzi-cluster-operator} {@code ServiceAccount} in the given namespace.
      * @param roleBindingFile
      * @param namespace
-     * @return
+     * @return role
      */
     public static String changeRoleBindingSubject(File roleBindingFile, String namespace) {
         YAMLMapper mapper = new YAMLMapper();
@@ -370,6 +388,26 @@ public final class TestUtils {
             subject.put("kind", "ServiceAccount")
                     .put("name", "strimzi-cluster-operator")
                     .put("namespace", namespace);
+            return mapper.writeValueAsString(node);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public static String changeDeploymentNamespaceUpgrade(File deploymentFile, String namespace) {
+        YAMLMapper mapper = new YAMLMapper();
+        try {
+            JsonNode node = mapper.readTree(deploymentFile);
+            // Change the docker org of the images in the 050-deployment.yaml
+            ObjectNode containerNode = (ObjectNode) node.at("/spec/template/spec/containers").get(0);
+            for (JsonNode envVar : containerNode.get("env")) {
+                String varName = envVar.get("name").textValue();
+                if (varName.matches("STRIMZI_NAMESPACE")) {
+                    // Replace all the default images with ones from the $DOCKER_ORG org and with the $DOCKER_TAG tag
+                    ((ObjectNode) envVar).remove("valueFrom");
+                    ((ObjectNode) envVar).put("value", namespace);
+                }
+            }
             return mapper.writeValueAsString(node);
         } catch (IOException e) {
             throw new RuntimeException(e);

@@ -4,6 +4,7 @@
  */
 package io.strimzi.operator.cluster.model;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import io.fabric8.kubernetes.api.model.Affinity;
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
@@ -66,12 +67,11 @@ import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.StringWriter;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
-import java.util.Properties;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -82,7 +82,6 @@ public abstract class AbstractModel {
 
     protected static final Logger log = LogManager.getLogger(AbstractModel.class.getName());
 
-    protected static final int CERTS_EXPIRATION_DAYS = 365;
     protected static final String DEFAULT_JVM_XMS = "128M";
 
     private static final Long DEFAULT_FS_GROUPID = 0L;
@@ -94,15 +93,16 @@ public abstract class AbstractModel {
     public static final String ENV_VAR_KAFKA_JVM_PERFORMANCE_OPTS = "KAFKA_JVM_PERFORMANCE_OPTS";
     public static final String ENV_VAR_DYNAMIC_HEAP_MAX = "DYNAMIC_HEAP_MAX";
     public static final String NETWORK_POLICY_KEY_SUFFIX = "-network-policy";
-    public static final String ENV_VAR_STRIMZI_KAFKA_GC_LOG_OPTS = "STRIMZI_KAFKA_GC_LOG_OPTS";
-    public static final String ENV_VAR_STRIMZI_GC_LOG_OPTS = "STRIMZI_GC_LOG_OPTS";
+    public static final String ENV_VAR_STRIMZI_KAFKA_GC_LOG_ENABLED = "STRIMZI_KAFKA_GC_LOG_ENABLED";
+    public static final String ENV_VAR_STRIMZI_GC_LOG_ENABLED = "STRIMZI_GC_LOG_ENABLED";
 
-    private static final String ANNO_STRIMZI_IO_DELETE_CLAIM = Annotations.STRIMZI_DOMAIN + "/delete-claim";
+    public static final String ANNO_STRIMZI_IO_DELETE_CLAIM = Annotations.STRIMZI_DOMAIN + "/delete-claim";
     @Deprecated
-    private static final String ANNO_CO_STRIMZI_IO_DELETE_CLAIM = "cluster.operator.strimzi.io/delete-claim";
+    public static final String ANNO_CO_STRIMZI_IO_DELETE_CLAIM = "cluster.operator.strimzi.io/delete-claim";
+    private static final Pattern LOGGER_PATTERN = Pattern.compile("\\$\\{(.*)\\}, ([A-Z]+)");
 
-    protected static final String DEFAULT_KAFKA_GC_LOGGING = "-verbose:gc -XX:+PrintGCDetails -XX:+PrintGCDateStamps -XX:+PrintGCTimeStamps";
-    protected static final String DEFAULT_STRIMZI_GC_LOGGING = "-XX:NativeMemoryTracking=summary -verbose:gc -XX:+PrintGCDetails -XX:+PrintGCDateStamps";
+    protected static final String DEFAULT_KAFKA_GC_LOG_ENABLED = String.valueOf(true);
+    protected static final String DEFAULT_STRIMZI_GC_LOG_ENABED = String.valueOf(true);
 
     protected final String cluster;
     protected final String namespace;
@@ -148,7 +148,7 @@ public abstract class AbstractModel {
     private Affinity userAffinity;
     private List<Toleration> tolerations;
 
-    protected Map validLoggerFields;
+    protected final Map<String, String> validLoggerFields;
     private final String[] validLoggerValues = new String[]{"INFO", "ERROR", "WARN", "TRACE", "DEBUG", "FATAL", "OFF" };
     private Logging logging;
     protected boolean gcLoggingEnabled = true;
@@ -186,6 +186,7 @@ public abstract class AbstractModel {
         this.cluster = cluster;
         this.namespace = namespace;
         this.labels = labels.withCluster(cluster);
+        this.validLoggerFields = getDefaultLogConfig().asMap();
     }
 
     public Labels getLabels() {
@@ -267,14 +268,9 @@ public abstract class AbstractModel {
         this.isMetricsEnabled = isMetricsEnabled;
     }
 
-    public String getGcLoggingOptions() {
-        return gcLoggingEnabled ? DEFAULT_KAFKA_GC_LOGGING : " ";
-    }
-
     protected void setGcLoggingEnabled(boolean gcLoggingEnabled) {
         this.gcLoggingEnabled = gcLoggingEnabled;
     }
-
 
     protected abstract String getDefaultLogConfigFileName();
 
@@ -282,50 +278,35 @@ public abstract class AbstractModel {
      * Returns map with all available loggers for current pod and default values.
      * @return
      */
-    protected Properties getDefaultLogConfig() {
-        Properties properties = new Properties();
-        String defaultLogConfigFileName = getDefaultLogConfigFileName();
-        try {
-            properties = getDefaultLoggingProperties(defaultLogConfigFileName);
-        } catch (IOException e) {
-            log.warn("Unable to read default log config from '{}'", defaultLogConfigFileName);
+    protected OrderedProperties getDefaultLogConfig() {
+        return getOrderedProperties(getDefaultLogConfigFileName());
+    }
+
+    @SuppressFBWarnings("OBL_UNSATISFIED_OBLIGATION") // InputStream is closed by properties.addStringPairs
+    public static OrderedProperties getOrderedProperties(String configFileName) {
+        OrderedProperties properties = new OrderedProperties();
+        if (configFileName != null && !configFileName.isEmpty()) {
+            InputStream is = AbstractModel.class.getResourceAsStream("/" + configFileName);
+            if (is == null) {
+                log.warn("Cannot find resource '{}'", configFileName);
+            } else {
+                try {
+                    properties.addStringPairs(is);
+                } catch (IOException e) {
+                    log.warn("Unable to read default log config from '{}'", configFileName);
+                }
+            }
         }
         return properties;
     }
 
     /**
-     * Takes resource file containing default log4j properties and returns it as a Properties.
-     * @param defaultConfigResourceFileName name of file, where default log4j properties are stored
-     * @return
-     */
-    protected Properties getDefaultLoggingProperties(String defaultConfigResourceFileName) throws IOException {
-        Properties defaultSettings = new Properties();
-        InputStream is = null;
-        try {
-            is = AbstractModel.class.getResourceAsStream("/" + defaultConfigResourceFileName);
-            defaultSettings.load(is);
-        } finally {
-            if (is != null) {
-                is.close();
-            }
-        }
-        return defaultSettings;
-    }
-
-    /**
      * Transforms map to log4j properties file format
-     * @param newSettings map with properties
+     * @param properties map with properties
      * @return
      */
-    protected static String createPropertiesString(Properties newSettings) {
-        StringWriter sw = new StringWriter();
-        try {
-            newSettings.store(sw, "Do not change this generated file. Logging can be configured in the corresponding kubernetes/openshift resource.");
-        } catch (IOException e) {
-            log.warn("Error creating properties", e);
-        }
-        // remove date comment, because it is updated with each reconciliation which leads to restarting pods
-        return sw.toString().replaceAll("#[A-Za-z]+ [A-Za-z]+ [0-9]+ [0-9]+:[0-9]+:[0-9]+ [A-Z]+ [0-9]+", "");
+    protected static String createPropertiesString(OrderedProperties properties) {
+        return properties.asPairsWithComment("Do not change this generated file. Logging can be configured in the corresponding kubernetes/openshift resource.");
     }
 
     public Logging getLogging() {
@@ -352,15 +333,14 @@ public abstract class AbstractModel {
                     log.warn(key + " is not a valid logger");
                     return;
                 }
-                if (key.toString().contains("log4j.appender.CONSOLE")) {
+                if (key.contains("log4j.appender.CONSOLE")) {
                     log.warn("You cannot set appender");
                     return;
                 }
-                if ((asList(validLoggerValues).contains(tmpEntry.toString().replaceAll(",[ ]+CONSOLE", ""))) || (asList(validLoggerValues).contains(tmpEntry))) {
+                if ((asList(validLoggerValues).contains(tmpEntry.replaceAll(",[ ]+CONSOLE", ""))) || (asList(validLoggerValues).contains(tmpEntry))) {
                     // correct value
                 } else {
-                    Pattern p = Pattern.compile("\\$\\{(.*)\\}, ([A-Z]+)");
-                    Matcher m = p.matcher(tmpEntry.toString());
+                    Matcher m = LOGGER_PATTERN.matcher(tmpEntry);
 
                     String logger = "";
                     String value = "";
@@ -386,8 +366,8 @@ public abstract class AbstractModel {
                 }
             });
             // update fields otherwise use default values
-            Properties newSettings = getDefaultLogConfig();
-            newSettings.putAll(((InlineLogging) logging).getLoggers());
+            OrderedProperties newSettings = getDefaultLogConfig();
+            newSettings.addMapPairs(((InlineLogging) logging).getLoggers());
             return createPropertiesString(newSettings);
         } else if (logging instanceof ExternalLogging) {
             if (externalCm != null) {
@@ -506,14 +486,6 @@ public abstract class AbstractModel {
         return cluster;
     }
 
-    public String getPersistentVolumeClaimName(int podId) {
-        return getPersistentVolumeClaimName(name,  podId);
-    }
-
-    public static String getPersistentVolumeClaimName(String name, int podId) {
-        return VOLUME_NAME + "-" + name + "-" + podId;
-    }
-
     public String getPodName(int podId) {
         return name + "-" + podId;
     }
@@ -561,14 +533,14 @@ public abstract class AbstractModel {
     /**
      * @return a list of init containers to add to the StatefulSet/Deployment
      */
-    protected List<Container> getInitContainers() {
+    protected List<Container> getInitContainers(ImagePullPolicy imagePullPolicy) {
         return null;
     }
 
     /**
      * @return a list of containers to add to the StatefulSet/Deployment
      */
-    protected abstract List<Container> getContainers();
+    protected abstract List<Container> getContainers(ImagePullPolicy imagePullPolicy);
 
     protected VolumeMount createVolumeMount(String name, String path) {
         VolumeMount volumeMount = new VolumeMountBuilder()
@@ -590,18 +562,26 @@ public abstract class AbstractModel {
     }
 
     protected ServicePort createServicePort(String name, int port, int targetPort, String protocol) {
-        ServicePort servicePort = new ServicePortBuilder()
-                .withName(name)
-                .withProtocol(protocol)
-                .withPort(port)
-                .withNewTargetPort(targetPort)
-                .build();
+        ServicePort servicePort = createServicePort(name, port, targetPort, null, protocol);
         log.trace("Created service port {}", servicePort);
         return servicePort;
     }
 
-    protected PersistentVolumeClaim createPersistentVolumeClaim(String name) {
-        PersistentClaimStorage storage = (PersistentClaimStorage) this.storage;
+    protected ServicePort createServicePort(String name, int port, int targetPort, Integer nodePort, String protocol) {
+        ServicePortBuilder builder = new ServicePortBuilder()
+            .withName(name)
+            .withProtocol(protocol)
+            .withPort(port)
+            .withNewTargetPort(targetPort);
+        if (nodePort != null) {
+            builder.withNewNodePort(nodePort);
+        }
+        ServicePort servicePort = builder.build();
+        log.trace("Created service port {}", servicePort);
+        return servicePort;
+    }
+
+    protected PersistentVolumeClaim createPersistentVolumeClaim(String name, PersistentClaimStorage storage) {
         Map<String, Quantity> requests = new HashMap<>();
         requests.put("storage", new Quantity(storage.getSize(), null));
         LabelSelector selector = null;
@@ -614,12 +594,12 @@ public abstract class AbstractModel {
                     .withName(name)
                 .endMetadata()
                 .withNewSpec()
-                .withAccessModes("ReadWriteOnce")
-                .withNewResources()
-                .withRequests(requests)
-                .endResources()
-                .withStorageClassName(storage.getStorageClass())
-                .withSelector(selector)
+                    .withAccessModes("ReadWriteOnce")
+                    .withNewResources()
+                        .withRequests(requests)
+                    .endResources()
+                    .withStorageClassName(storage.getStorageClass())
+                    .withSelector(selector)
                 .endSpec();
 
         return pvcb.build();
@@ -763,17 +743,11 @@ public abstract class AbstractModel {
             List<Container> containers,
             boolean isOpenShift) {
 
-        annotations = new HashMap<>(annotations);
-
-        annotations.put(ANNO_STRIMZI_IO_DELETE_CLAIM,
-                String.valueOf(storage instanceof PersistentClaimStorage
-                        && ((PersistentClaimStorage) storage).isDeleteClaim()));
-
         PodSecurityContext securityContext = templateSecurityContext;
 
         // if a persistent volume claim is requested and the running cluster is a Kubernetes one and we have no user configured PodSecurityContext
         // we set the security context
-        if (this.storage instanceof PersistentClaimStorage && !isOpenShift && securityContext == null) {
+        if (ModelUtils.containsPersistentStorage(storage) && !isOpenShift && securityContext == null) {
             securityContext = new PodSecurityContextBuilder()
                     .withFsGroup(AbstractModel.DEFAULT_FS_GROUPID)
                     .build();
@@ -1016,15 +990,6 @@ public abstract class AbstractModel {
         this.ownerUid = parent.getMetadata().getUid();
     }
 
-    public static boolean deleteClaim(StatefulSet ss) {
-        if (!ss.getSpec().getVolumeClaimTemplates().isEmpty()) {
-            return Annotations.booleanAnnotation(ss, ANNO_STRIMZI_IO_DELETE_CLAIM,
-                    false, ANNO_CO_STRIMZI_IO_DELETE_CLAIM);
-        } else {
-            return false;
-        }
-    }
-
     /**
      * Generated a Map with Prometheus annotations
      *
@@ -1058,6 +1023,28 @@ public abstract class AbstractModel {
                     .withSelector(new LabelSelectorBuilder().withMatchLabels(getSelectorLabels()).build())
                 .endSpec()
                 .build();
+    }
+
+    /**
+     * When ImagePullPolicy is not specified by the user, Kubernetes will automatically set it based on the image
+     *    :latest results in Always
+     *    anything else results in IfNotPresent
+     * This causes issues in diffing. So we emulate here the Kubernetes defaults and set the policy accoridngly already on our side.
+     *
+     * @param requestedImagePullPolicy  The imagePullPolicy requested by the user (is always preferred when set, ignored when null)
+     * @param image The image used for the container. From its tag we determine the default policy
+     * @return  The Image Pull Policy: Always, Never or IfNotPresent
+     */
+    protected String determineImagePullPolicy(ImagePullPolicy requestedImagePullPolicy, String image)  {
+        if (requestedImagePullPolicy != null)   {
+            return requestedImagePullPolicy.toString();
+        }
+
+        if (image.toLowerCase(Locale.ENGLISH).endsWith(":latest"))  {
+            return ImagePullPolicy.ALWAYS.toString();
+        } else {
+            return ImagePullPolicy.IFNOTPRESENT.toString();
+        }
     }
 
     String getAncillaryConfigMapKeyLogConfig() {

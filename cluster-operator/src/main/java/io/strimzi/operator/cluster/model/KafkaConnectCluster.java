@@ -28,10 +28,12 @@ import io.fabric8.kubernetes.api.model.policy.PodDisruptionBudget;
 import io.strimzi.api.kafka.model.CertAndKeySecretSource;
 import io.strimzi.api.kafka.model.CertSecretSource;
 import io.strimzi.api.kafka.model.KafkaConnect;
+import io.strimzi.api.kafka.model.KafkaConnectAuthenticationPlain;
 import io.strimzi.api.kafka.model.KafkaConnectAuthenticationScramSha512;
 import io.strimzi.api.kafka.model.KafkaConnectAuthenticationTls;
 import io.strimzi.api.kafka.model.KafkaConnectS2ISpec;
 import io.strimzi.api.kafka.model.KafkaConnectSpec;
+import io.strimzi.api.kafka.model.KafkaConnectTls;
 import io.strimzi.api.kafka.model.PasswordSecretSource;
 import io.strimzi.api.kafka.model.connect.ExternalConfiguration;
 import io.strimzi.api.kafka.model.connect.ExternalConfigurationEnv;
@@ -44,8 +46,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-
-import static java.util.Collections.emptySet;
 
 public class KafkaConnectCluster extends AbstractModel {
 
@@ -72,20 +72,23 @@ public class KafkaConnectCluster extends AbstractModel {
     protected static final String ENV_VAR_KAFKA_CONNECT_CONFIGURATION = "KAFKA_CONNECT_CONFIGURATION";
     protected static final String ENV_VAR_KAFKA_CONNECT_METRICS_ENABLED = "KAFKA_CONNECT_METRICS_ENABLED";
     protected static final String ENV_VAR_KAFKA_CONNECT_BOOTSTRAP_SERVERS = "KAFKA_CONNECT_BOOTSTRAP_SERVERS";
+    protected static final String ENV_VAR_KAFKA_CONNECT_TLS = "KAFKA_CONNECT_TLS";
     protected static final String ENV_VAR_KAFKA_CONNECT_TRUSTED_CERTS = "KAFKA_CONNECT_TRUSTED_CERTS";
     protected static final String ENV_VAR_KAFKA_CONNECT_TLS_AUTH_CERT = "KAFKA_CONNECT_TLS_AUTH_CERT";
     protected static final String ENV_VAR_KAFKA_CONNECT_TLS_AUTH_KEY = "KAFKA_CONNECT_TLS_AUTH_KEY";
     protected static final String ENV_VAR_KAFKA_CONNECT_SASL_PASSWORD_FILE = "KAFKA_CONNECT_SASL_PASSWORD_FILE";
     protected static final String ENV_VAR_KAFKA_CONNECT_SASL_USERNAME = "KAFKA_CONNECT_SASL_USERNAME";
+    protected static final String ENV_VAR_KAFKA_CONNECT_SASL_MECHANISM = "KAFKA_CONNECT_SASL_MECHANISM";
 
     protected String bootstrapServers;
     protected List<ExternalConfigurationEnv> externalEnvs = Collections.EMPTY_LIST;
     protected List<ExternalConfigurationVolumeSource> externalVolumes = Collections.EMPTY_LIST;
 
-    private List<CertSecretSource> trustedCertificates;
+    private KafkaConnectTls tls;
     private CertAndKeySecretSource tlsAuthCertAndKey;
     private PasswordSecretSource passwordSecret;
     private String username;
+    private String saslMechanism;
 
     /**
      * Constructor
@@ -98,7 +101,6 @@ public class KafkaConnectCluster extends AbstractModel {
         super(namespace, cluster, labels);
         this.name = kafkaConnectClusterName(cluster);
         this.serviceName = serviceName(cluster);
-        this.validLoggerFields = getDefaultLogConfig();
         this.ancillaryConfigName = logAndMetricsConfigName(cluster);
         this.replicas = DEFAULT_REPLICAS;
         this.readinessPath = "/";
@@ -143,94 +145,101 @@ public class KafkaConnectCluster extends AbstractModel {
     protected static <C extends KafkaConnectCluster> C fromSpec(KafkaConnectSpec spec,
                                                                 KafkaVersion.Lookup versions,
                                                                 C kafkaConnect) {
-        kafkaConnect.setReplicas(spec != null && spec.getReplicas() > 0 ? spec.getReplicas() : DEFAULT_REPLICAS);
-        kafkaConnect.setConfiguration(new KafkaConnectConfiguration(spec != null ? spec.getConfig().entrySet() : emptySet()));
-        if (spec != null) {
-            String image = spec instanceof KafkaConnectS2ISpec ?
-                    versions.kafkaConnectS2iVersion(spec.getImage(), spec.getVersion())
-                    : versions.kafkaConnectVersion(spec.getImage(), spec.getVersion());
-            if (image == null) {
-                throw new InvalidResourceException("Version is not supported");
-            }
-            kafkaConnect.setImage(image);
+        kafkaConnect.setReplicas(spec.getReplicas() > 0 ? spec.getReplicas() : DEFAULT_REPLICAS);
+        kafkaConnect.setConfiguration(new KafkaConnectConfiguration(spec.getConfig().entrySet()));
 
-            kafkaConnect.setResources(spec.getResources());
-            kafkaConnect.setLogging(spec.getLogging());
-            kafkaConnect.setGcLoggingEnabled(spec.getJvmOptions() == null ? true : spec.getJvmOptions().isGcLoggingEnabled());
-            kafkaConnect.setJvmOptions(spec.getJvmOptions());
-            if (spec.getReadinessProbe() != null) {
-                kafkaConnect.setReadinessInitialDelay(spec.getReadinessProbe().getInitialDelaySeconds());
-                kafkaConnect.setReadinessTimeout(spec.getReadinessProbe().getTimeoutSeconds());
-            }
-            if (spec.getLivenessProbe() != null) {
-                kafkaConnect.setLivenessInitialDelay(spec.getLivenessProbe().getInitialDelaySeconds());
-                kafkaConnect.setLivenessTimeout(spec.getLivenessProbe().getTimeoutSeconds());
-            }
+        String image = spec instanceof KafkaConnectS2ISpec ?
+                versions.kafkaConnectS2iVersion(spec.getImage(), spec.getVersion())
+                : versions.kafkaConnectVersion(spec.getImage(), spec.getVersion());
+        if (image == null) {
+            throw new InvalidResourceException("Version " + spec.getVersion() + " is not supported. Supported versions are: " + String.join(", ", versions.supportedVersions()) + ".");
+        }
+        kafkaConnect.setImage(image);
 
-            Map<String, Object> metrics = spec.getMetrics();
-            if (metrics != null) {
-                kafkaConnect.setMetricsEnabled(true);
-                kafkaConnect.setMetricsConfig(metrics.entrySet());
-            }
-            kafkaConnect.setUserAffinity(spec.getAffinity());
-            kafkaConnect.setTolerations(spec.getTolerations());
-            kafkaConnect.setBootstrapServers(spec.getBootstrapServers());
+        kafkaConnect.setResources(spec.getResources());
+        kafkaConnect.setLogging(spec.getLogging());
+        kafkaConnect.setGcLoggingEnabled(spec.getJvmOptions() == null ? true : spec.getJvmOptions().isGcLoggingEnabled());
+        kafkaConnect.setJvmOptions(spec.getJvmOptions());
+        if (spec.getReadinessProbe() != null) {
+            kafkaConnect.setReadinessInitialDelay(spec.getReadinessProbe().getInitialDelaySeconds());
+            kafkaConnect.setReadinessTimeout(spec.getReadinessProbe().getTimeoutSeconds());
+        }
+        if (spec.getLivenessProbe() != null) {
+            kafkaConnect.setLivenessInitialDelay(spec.getLivenessProbe().getInitialDelaySeconds());
+            kafkaConnect.setLivenessTimeout(spec.getLivenessProbe().getTimeoutSeconds());
+        }
 
-            if (spec.getTls() != null) {
-                kafkaConnect.setTrustedCertificates(spec.getTls().getTrustedCertificates());
-            }
+        Map<String, Object> metrics = spec.getMetrics();
+        if (metrics != null) {
+            kafkaConnect.setMetricsEnabled(true);
+            kafkaConnect.setMetricsConfig(metrics.entrySet());
+        }
+        kafkaConnect.setUserAffinity(spec.getAffinity());
+        kafkaConnect.setTolerations(spec.getTolerations());
+        kafkaConnect.setBootstrapServers(spec.getBootstrapServers());
 
-            if (spec.getAuthentication() != null)   {
-                if (spec.getAuthentication() instanceof KafkaConnectAuthenticationTls) {
-                    KafkaConnectAuthenticationTls auth = (KafkaConnectAuthenticationTls) spec.getAuthentication();
-                    if (auth.getCertificateAndKey() != null) {
-                        kafkaConnect.setTlsAuthCertAndKey(auth.getCertificateAndKey());
-                        if (spec.getTls() == null) {
-                            log.warn("TLS configuration missing: related TLS client authentication will not work properly");
-                        }
-                    } else {
-                        log.warn("TLS Client authentication selected, but no certificate and key configured.");
-                        throw new InvalidResourceException("TLS Client authentication selected, but no certificate and key configured.");
+        kafkaConnect.setTls(spec.getTls());
+
+        if (spec.getAuthentication() != null)   {
+            if (spec.getAuthentication() instanceof KafkaConnectAuthenticationTls) {
+                KafkaConnectAuthenticationTls auth = (KafkaConnectAuthenticationTls) spec.getAuthentication();
+                if (auth.getCertificateAndKey() != null) {
+                    kafkaConnect.setTlsAuthCertAndKey(auth.getCertificateAndKey());
+                    if (spec.getTls() == null) {
+                        log.warn("TLS configuration missing: related TLS client authentication will not work properly");
                     }
-                } else if (spec.getAuthentication() instanceof KafkaConnectAuthenticationScramSha512)    {
-                    KafkaConnectAuthenticationScramSha512 auth = (KafkaConnectAuthenticationScramSha512) spec.getAuthentication();
-                    if (auth.getUsername() != null && auth.getPasswordSecret() != null) {
-                        kafkaConnect.setUsernameAndPassword(auth.getUsername(), auth.getPasswordSecret());
-                    } else  {
-                        log.warn("SCRAM-SHA-512 authentication selected, but no username and password configured.");
-                        throw new InvalidResourceException("SCRAM-SHA-512 authentication selected, but no username and password configured.");
-                    }
+                } else {
+                    log.warn("TLS Client authentication selected, but no certificate and key configured.");
+                    throw new InvalidResourceException("TLS Client authentication selected, but no certificate and key configured.");
+                }
+            } else if (spec.getAuthentication() instanceof KafkaConnectAuthenticationScramSha512)    {
+                KafkaConnectAuthenticationScramSha512 auth = (KafkaConnectAuthenticationScramSha512) spec.getAuthentication();
+                if (auth.getUsername() != null && auth.getPasswordSecret() != null) {
+                    kafkaConnect.setUsernameAndPassword(auth.getUsername(), auth.getPasswordSecret());
+                    kafkaConnect.setSaslMechanism(auth.getType());
+                } else  {
+                    log.warn("SCRAM-SHA-512 authentication selected, but no username and password configured.");
+                    throw new InvalidResourceException("SCRAM-SHA-512 authentication selected, but no username and password configured.");
+                }
+            } else if (spec.getAuthentication() instanceof KafkaConnectAuthenticationPlain) {
+                KafkaConnectAuthenticationPlain auth = (KafkaConnectAuthenticationPlain) spec.getAuthentication();
+                if (auth.getUsername() != null && auth.getPasswordSecret() != null) {
+                    kafkaConnect.setUsernameAndPassword(auth.getUsername(), auth.getPasswordSecret());
+                    kafkaConnect.setSaslMechanism(auth.getType());
+                } else  {
+                    log.warn("PLAIN authentication selected, but no username and password configured.");
+                    throw new InvalidResourceException("PLAIN authentication selected, but no username and password configured.");
                 }
             }
+        }
 
-            if (spec.getTemplate() != null) {
-                KafkaConnectTemplate template = spec.getTemplate();
+        if (spec.getTemplate() != null) {
+            KafkaConnectTemplate template = spec.getTemplate();
 
-                if (template.getDeployment() != null && template.getDeployment().getMetadata() != null)  {
-                    kafkaConnect.templateDeploymentLabels = template.getDeployment().getMetadata().getLabels();
-                    kafkaConnect.templateDeploymentAnnotations = template.getDeployment().getMetadata().getAnnotations();
-                }
-
-                ModelUtils.parsePodTemplate(kafkaConnect, template.getPod());
-
-                if (template.getApiService() != null && template.getApiService().getMetadata() != null)  {
-                    kafkaConnect.templateServiceLabels = template.getApiService().getMetadata().getLabels();
-                    kafkaConnect.templateServiceAnnotations = template.getApiService().getMetadata().getAnnotations();
-                }
-
-                ModelUtils.parsePodDisruptionBudgetTemplate(kafkaConnect, template.getPodDisruptionBudget());
+            if (template.getDeployment() != null && template.getDeployment().getMetadata() != null)  {
+                kafkaConnect.templateDeploymentLabels = template.getDeployment().getMetadata().getLabels();
+                kafkaConnect.templateDeploymentAnnotations = template.getDeployment().getMetadata().getAnnotations();
             }
 
-            if (spec.getExternalConfiguration() != null)    {
-                ExternalConfiguration externalConfiguration = spec.getExternalConfiguration();
+            ModelUtils.parsePodTemplate(kafkaConnect, template.getPod());
 
-                if (externalConfiguration.getEnv() != null && !externalConfiguration.getEnv().isEmpty())    {
-                    kafkaConnect.externalEnvs = externalConfiguration.getEnv();
-                }
+            if (template.getApiService() != null && template.getApiService().getMetadata() != null)  {
+                kafkaConnect.templateServiceLabels = template.getApiService().getMetadata().getLabels();
+                kafkaConnect.templateServiceAnnotations = template.getApiService().getMetadata().getAnnotations();
+            }
 
-                if (externalConfiguration.getVolumes() != null && !externalConfiguration.getVolumes().isEmpty())    {
-                    kafkaConnect.externalVolumes = externalConfiguration.getVolumes();
-                }
+            ModelUtils.parsePodDisruptionBudgetTemplate(kafkaConnect, template.getPodDisruptionBudget());
+        }
+
+        if (spec.getExternalConfiguration() != null)    {
+            ExternalConfiguration externalConfiguration = spec.getExternalConfiguration();
+
+            if (externalConfiguration.getEnv() != null && !externalConfiguration.getEnv().isEmpty())    {
+                kafkaConnect.externalEnvs = externalConfiguration.getEnv();
+            }
+
+            if (externalConfiguration.getVolumes() != null && !externalConfiguration.getVolumes().isEmpty())    {
+                kafkaConnect.externalVolumes = externalConfiguration.getVolumes();
             }
         }
 
@@ -260,14 +269,20 @@ public class KafkaConnectCluster extends AbstractModel {
     protected List<Volume> getVolumes(boolean isOpenShift) {
         List<Volume> volumeList = new ArrayList<>(1);
         volumeList.add(createConfigMapVolume(logAndMetricsConfigVolumeName, ancillaryConfigName));
-        if (trustedCertificates != null && trustedCertificates.size() > 0) {
-            for (CertSecretSource certSecretSource: trustedCertificates) {
-                // skipping if a volume with same Secret name was already added
-                if (!volumeList.stream().anyMatch(v -> v.getName().equals(certSecretSource.getSecretName()))) {
-                    volumeList.add(createSecretVolume(certSecretSource.getSecretName(), certSecretSource.getSecretName(), isOpenShift));
+
+        if (tls != null) {
+            List<CertSecretSource> trustedCertificates = tls.getTrustedCertificates();
+
+            if (trustedCertificates != null && trustedCertificates.size() > 0) {
+                for (CertSecretSource certSecretSource : trustedCertificates) {
+                    // skipping if a volume with same Secret name was already added
+                    if (!volumeList.stream().anyMatch(v -> v.getName().equals(certSecretSource.getSecretName()))) {
+                        volumeList.add(createSecretVolume(certSecretSource.getSecretName(), certSecretSource.getSecretName(), isOpenShift));
+                    }
                 }
             }
         }
+
         if (tlsAuthCertAndKey != null) {
             // skipping if a volume with same Secret name was already added
             if (!volumeList.stream().anyMatch(v -> v.getName().equals(tlsAuthCertAndKey.getSecretName()))) {
@@ -328,15 +343,21 @@ public class KafkaConnectCluster extends AbstractModel {
     protected List<VolumeMount> getVolumeMounts() {
         List<VolumeMount> volumeMountList = new ArrayList<>(1);
         volumeMountList.add(createVolumeMount(logAndMetricsConfigVolumeName, logAndMetricsConfigMountPath));
-        if (trustedCertificates != null && trustedCertificates.size() > 0) {
-            for (CertSecretSource certSecretSource: trustedCertificates) {
-                // skipping if a volume mount with same Secret name was already added
-                if (!volumeMountList.stream().anyMatch(vm -> vm.getName().equals(certSecretSource.getSecretName()))) {
-                    volumeMountList.add(createVolumeMount(certSecretSource.getSecretName(),
-                            TLS_CERTS_BASE_VOLUME_MOUNT + certSecretSource.getSecretName()));
+
+        if (tls != null) {
+            List<CertSecretSource> trustedCertificates = tls.getTrustedCertificates();
+
+            if (trustedCertificates != null && trustedCertificates.size() > 0) {
+                for (CertSecretSource certSecretSource : trustedCertificates) {
+                    // skipping if a volume mount with same Secret name was already added
+                    if (!volumeMountList.stream().anyMatch(vm -> vm.getName().equals(certSecretSource.getSecretName()))) {
+                        volumeMountList.add(createVolumeMount(certSecretSource.getSecretName(),
+                                TLS_CERTS_BASE_VOLUME_MOUNT + certSecretSource.getSecretName()));
+                    }
                 }
             }
         }
+
         if (tlsAuthCertAndKey != null) {
             // skipping if a volume mount with same Secret name was already added
             if (!volumeMountList.stream().anyMatch(vm -> vm.getName().equals(tlsAuthCertAndKey.getSecretName()))) {
@@ -376,7 +397,7 @@ public class KafkaConnectCluster extends AbstractModel {
         return volumeMountList;
     }
 
-    public Deployment generateDeployment(Map<String, String> annotations, boolean isOpenShift) {
+    public Deployment generateDeployment(Map<String, String> annotations, boolean isOpenShift, ImagePullPolicy imagePullPolicy) {
         DeploymentStrategy updateStrategy = new DeploymentStrategyBuilder()
                 .withType("RollingUpdate")
                 .withRollingUpdate(new RollingUpdateDeploymentBuilder()
@@ -390,13 +411,13 @@ public class KafkaConnectCluster extends AbstractModel {
                 Collections.emptyMap(),
                 annotations,
                 getMergedAffinity(),
-                getInitContainers(),
-                getContainers(),
+                getInitContainers(imagePullPolicy),
+                getContainers(imagePullPolicy),
                 getVolumes(isOpenShift));
     }
 
     @Override
-    protected List<Container> getContainers() {
+    protected List<Container> getContainers(ImagePullPolicy imagePullPolicy) {
 
         List<Container> containers = new ArrayList<>();
 
@@ -409,6 +430,7 @@ public class KafkaConnectCluster extends AbstractModel {
                 .withReadinessProbe(createHttpProbe(readinessPath, REST_API_PORT_NAME, readinessInitialDelay, readinessTimeout))
                 .withVolumeMounts(getVolumeMounts())
                 .withResources(ModelUtils.resources(getResources()))
+                .withImagePullPolicy(determineImagePullPolicy(imagePullPolicy, getImage()))
                 .build();
 
         containers.add(container);
@@ -422,30 +444,40 @@ public class KafkaConnectCluster extends AbstractModel {
         varList.add(buildEnvVar(ENV_VAR_KAFKA_CONNECT_CONFIGURATION, configuration.getConfiguration()));
         varList.add(buildEnvVar(ENV_VAR_KAFKA_CONNECT_METRICS_ENABLED, String.valueOf(isMetricsEnabled)));
         varList.add(buildEnvVar(ENV_VAR_KAFKA_CONNECT_BOOTSTRAP_SERVERS, bootstrapServers));
-        varList.add(buildEnvVar(ENV_VAR_STRIMZI_KAFKA_GC_LOG_OPTS, getGcLoggingOptions()));
+        varList.add(buildEnvVar(ENV_VAR_STRIMZI_KAFKA_GC_LOG_ENABLED, String.valueOf(gcLoggingEnabled)));
+
         heapOptions(varList, 1.0, 0L);
         jvmPerformanceOptions(varList);
-        if (trustedCertificates != null && trustedCertificates.size() > 0) {
-            StringBuilder sb = new StringBuilder();
-            boolean separator = false;
-            for (CertSecretSource certSecretSource: trustedCertificates) {
-                if (separator) {
-                    sb.append(";");
+
+        if (tls != null) {
+            varList.add(buildEnvVar(ENV_VAR_KAFKA_CONNECT_TLS, "true"));
+
+            List<CertSecretSource> trustedCertificates = tls.getTrustedCertificates();
+
+            if (trustedCertificates != null && trustedCertificates.size() > 0) {
+                StringBuilder sb = new StringBuilder();
+                boolean separator = false;
+                for (CertSecretSource certSecretSource : trustedCertificates) {
+                    if (separator) {
+                        sb.append(";");
+                    }
+                    sb.append(certSecretSource.getSecretName() + "/" + certSecretSource.getCertificate());
+                    separator = true;
                 }
-                sb.append(certSecretSource.getSecretName() + "/" + certSecretSource.getCertificate());
-                separator = true;
+                varList.add(buildEnvVar(ENV_VAR_KAFKA_CONNECT_TRUSTED_CERTS, sb.toString()));
             }
-            varList.add(buildEnvVar(ENV_VAR_KAFKA_CONNECT_TRUSTED_CERTS, sb.toString()));
         }
+
         if (tlsAuthCertAndKey != null) {
             varList.add(buildEnvVar(ENV_VAR_KAFKA_CONNECT_TLS_AUTH_CERT,
                     String.format("%s/%s", tlsAuthCertAndKey.getSecretName(), tlsAuthCertAndKey.getCertificate())));
             varList.add(buildEnvVar(ENV_VAR_KAFKA_CONNECT_TLS_AUTH_KEY,
                     String.format("%s/%s", tlsAuthCertAndKey.getSecretName(), tlsAuthCertAndKey.getKey())));
-        } else if (passwordSecret != null)  {
+        } else if (passwordSecret != null) {
             varList.add(buildEnvVar(ENV_VAR_KAFKA_CONNECT_SASL_USERNAME, username));
             varList.add(buildEnvVar(ENV_VAR_KAFKA_CONNECT_SASL_PASSWORD_FILE,
                     String.format("%s/%s", passwordSecret.getSecretName(), passwordSecret.getPassword())));
+            varList.add(buildEnvVar(ENV_VAR_KAFKA_CONNECT_SASL_MECHANISM, saslMechanism));
         }
 
         varList.addAll(getExternalConfigurationEnvVars());
@@ -503,11 +535,12 @@ public class KafkaConnectCluster extends AbstractModel {
     }
 
     /**
-     * Set the trusted certificates with the certificate to trust
-     * @param trustedCertificates trusted certificates list
+     * Set the tls configuration with the certificate to trust
+     *
+     * @param tls trusted certificates list
      */
-    protected void setTrustedCertificates(List<CertSecretSource> trustedCertificates) {
-        this.trustedCertificates = trustedCertificates;
+    protected void setTls(KafkaConnectTls tls) {
+        this.tls = tls;
     }
 
     /**
@@ -519,7 +552,7 @@ public class KafkaConnectCluster extends AbstractModel {
     }
 
     /**
-     * Set the username and password for SASL SCRAM-SHA-512 based authentication
+     * Set the username and password for SASL based authentication
      *
      * @param username          Username
      * @param passwordSecret    Secret with password
@@ -527,6 +560,14 @@ public class KafkaConnectCluster extends AbstractModel {
     protected void setUsernameAndPassword(String username, PasswordSecretSource passwordSecret) {
         this.username = username;
         this.passwordSecret = passwordSecret;
+    }
+
+    /**
+     * Set the sasl mechanism, supported mechanisms including scram-sha-512 and plain
+     * @param saslMechanism
+     */
+    protected void setSaslMechanism(String saslMechanism) {
+        this.saslMechanism = saslMechanism;
     }
 
     /**

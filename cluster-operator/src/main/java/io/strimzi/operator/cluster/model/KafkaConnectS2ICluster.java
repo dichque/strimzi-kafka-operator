@@ -47,7 +47,6 @@ public class KafkaConnectS2ICluster extends KafkaConnectCluster {
      */
     private KafkaConnectS2ICluster(String namespace, String cluster, Labels labels) {
         super(namespace, cluster, labels);
-        this.validLoggerFields = getDefaultLogConfig();
     }
 
     public static KafkaConnectS2ICluster fromCrd(KafkaConnectS2I kafkaConnectS2I, KafkaVersion.Lookup versions) {
@@ -57,7 +56,7 @@ public class KafkaConnectS2ICluster extends KafkaConnectCluster {
                 Labels.fromResource(kafkaConnectS2I).withKind(kafkaConnectS2I.getKind())));
 
         cluster.setOwnerReference(kafkaConnectS2I);
-        cluster.setInsecureSourceRepository(spec != null ? spec.isInsecureSourceRepository() : false);
+        cluster.setInsecureSourceRepository(spec.isInsecureSourceRepository());
 
         return cluster;
     }
@@ -67,7 +66,7 @@ public class KafkaConnectS2ICluster extends KafkaConnectCluster {
      *
      * @return      Source ImageStream resource definition
      */
-    public DeploymentConfig generateDeploymentConfig(Map<String, String> annotations, boolean isOpenShift) {
+    public DeploymentConfig generateDeploymentConfig(Map<String, String> annotations, boolean isOpenShift, ImagePullPolicy imagePullPolicy) {
         Container container = new ContainerBuilder()
                 .withName(name)
                 .withImage(image)
@@ -77,6 +76,7 @@ public class KafkaConnectS2ICluster extends KafkaConnectCluster {
                 .withReadinessProbe(createHttpProbe(readinessPath, REST_API_PORT_NAME, readinessInitialDelay, readinessTimeout))
                 .withVolumeMounts(getVolumeMounts())
                 .withResources(ModelUtils.resources(getResources()))
+                .withImagePullPolicy(determineImagePullPolicy(imagePullPolicy, image))
                 .build();
 
         DeploymentTriggerPolicy configChangeTrigger = new DeploymentTriggerPolicyBuilder()

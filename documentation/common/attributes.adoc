@@ -53,6 +53,8 @@
 :K8sPullingImagesFromPrivateRegistries: link:https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/[Pull an Image from a Private Registry^]
 :K8sConfigureSecurityContext: link:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/[Configure a Security Context for a Pod or Container^]
 :K8sNetworkPolicyPeerAPI: link:https://v1-9.docs.kubernetes.io/docs/reference/generated/kubernetes-api/v1.9/#networkpolicypeer-v1-networking[NetworkPolicyPeer API reference^]
+:K8sPodDisruptionBudgets: link:https://kubernetes.io/docs/concepts/workloads/pods/disruptions/[Disruptions^]
+:K8sImagePullPolicies: link:https://kubernetes.io/docs/concepts/containers/images/#updating-images[Disruptions^]
 
 :ApacheKafkaBrokerConfig: link:http://kafka.apache.org/20/documentation.html#brokerconfigs[Apache Kafka documentation^]
 :ApacheKafkaConnectConfig: link:http://kafka.apache.org/20/documentation.html#connectconfigs[Apache Kafka documentation^]
@@ -62,9 +64,7 @@
 
 :JMXExporter: link:https://github.com/prometheus/jmx_exporter[JMX Exporter documentation^]
 
-:CronExpression: link:http://www.quartz-scheduler.org/documentation/quartz-2.x/tutorials/crontrigger.html[cron expression^]
-
-:DefaultKafkaVersion: 2.0.0
+:CronExpression: link:http://www.quartz-scheduler.org/documentation/quartz-2.3.0/tutorials/tutorial-lesson-06.html[cron expression^]
 
 // Docker image names
 :DockerTag: {ProductVersion}
@@ -86,6 +86,7 @@
 // Section enablers
 :Kubernetes:
 :Helm:
+:StrimziUpgrades:
 :InstallationAppendix:
 :MetricsAppendix:
 :Downloading:

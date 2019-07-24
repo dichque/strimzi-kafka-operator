@@ -50,8 +50,8 @@ Used in: xref:type-KafkaSpec-{context}[`KafkaSpec`]
 |integer
 |image                1.2+<.<|The docker image for the pods. The default value depends on the configured `Kafka.spec.kafka.version`.
 |string
-|storage              1.2+<.<|Storage configuration (disk). Cannot be updated. The type depends on the value of the `storage.type` property within the given object, which must be one of [ephemeral, persistent-claim].
-|xref:type-EphemeralStorage-{context}[`EphemeralStorage`], xref:type-PersistentClaimStorage-{context}[`PersistentClaimStorage`]
+|storage              1.2+<.<|Storage configuration (disk). Cannot be updated. The type depends on the value of the `storage.type` property within the given object, which must be one of [ephemeral, persistent-claim, jbod].
+|xref:type-EphemeralStorage-{context}[`EphemeralStorage`], xref:type-PersistentClaimStorage-{context}[`PersistentClaimStorage`], xref:type-JbodStorage-{context}[`JbodStorage`]
 |listeners            1.2+<.<|Configures listeners of Kafka brokers.
 |xref:type-KafkaListeners-{context}[`KafkaListeners`]
 |authorization        1.2+<.<|Authorization configuration for Kafka brokers. The type depends on the value of the `authorization.type` property within the given object, which must be one of [simple].
@@ -93,7 +93,7 @@ Used in: xref:type-KafkaSpec-{context}[`KafkaSpec`]
 [id='type-EphemeralStorage-{context}']
 ### `EphemeralStorage` schema reference
 
-Used in: xref:type-KafkaClusterSpec-{context}[`KafkaClusterSpec`], xref:type-ZookeeperClusterSpec-{context}[`ZookeeperClusterSpec`]
+Used in: xref:type-JbodStorage-{context}[`JbodStorage`], xref:type-KafkaClusterSpec-{context}[`KafkaClusterSpec`], xref:type-ZookeeperClusterSpec-{context}[`ZookeeperClusterSpec`]
 
 
 The `type` property is a discriminator that distinguishes the use of the type `EphemeralStorage` from xref:type-PersistentClaimStorage-{context}[`PersistentClaimStorage`].
@@ -101,6 +101,8 @@ It must have the value `ephemeral` for the type `EphemeralStorage`.
 [options="header"]
 |====
 |Field        |Description
+|id    1.2+<.<|Storage identification number. It is mandatory only for storage volumes defined in a storage of type 'jbod'.
+|integer
 |type  1.2+<.<|Must be `ephemeral`.
 |string
 |====
@@ -108,7 +110,7 @@ It must have the value `ephemeral` for the type `EphemeralStorage`.
 [id='type-PersistentClaimStorage-{context}']
 ### `PersistentClaimStorage` schema reference
 
-Used in: xref:type-KafkaClusterSpec-{context}[`KafkaClusterSpec`], xref:type-ZookeeperClusterSpec-{context}[`ZookeeperClusterSpec`]
+Used in: xref:type-JbodStorage-{context}[`JbodStorage`], xref:type-KafkaClusterSpec-{context}[`KafkaClusterSpec`], xref:type-ZookeeperClusterSpec-{context}[`ZookeeperClusterSpec`]
 
 
 The `type` property is a discriminator that distinguishes the use of the type `PersistentClaimStorage` from xref:type-EphemeralStorage-{context}[`EphemeralStorage`].
@@ -126,6 +128,25 @@ It must have the value `persistent-claim` for the type `PersistentClaimStorage`.
 |boolean
 |class        1.2+<.<|The storage class to use for dynamic volume allocation.
 |string
+|id           1.2+<.<|Storage identification number. It is mandatory only for storage volumes defined in a storage of type 'jbod'.
+|integer
+|====
+
+[id='type-JbodStorage-{context}']
+### `JbodStorage` schema reference
+
+Used in: xref:type-KafkaClusterSpec-{context}[`KafkaClusterSpec`]
+
+
+The `type` property is a discriminator that distinguishes the use of the type `JbodStorage` from xref:type-EphemeralStorage-{context}[`EphemeralStorage`], xref:type-PersistentClaimStorage-{context}[`PersistentClaimStorage`].
+It must have the value `jbod` for the type `JbodStorage`.
+[options="header"]
+|====
+|Field           |Description
+|type     1.2+<.<|Must be `jbod`.
+|string
+|volumes  1.2+<.<|List of volumes as Storage objects representing the JBOD disks array.
+|xref:type-EphemeralStorage-{context}[`EphemeralStorage`], xref:type-PersistentClaimStorage-{context}[`PersistentClaimStorage`] array
 |====
 
 [id='type-KafkaListeners-{context}']
@@ -228,6 +249,57 @@ It must have the value `route` for the type `KafkaListenerExternalRoute`.
 
 
 |https://v1-9.docs.kubernetes.io/docs/reference/generated/kubernetes-api/v1.9/#networkpolicypeer-v1-networking[NetworkPolicyPeer] array
+|overrides           1.2+<.<|Overrides for external bootstrap and broker services and externally advertised addresses.
+|xref:type-RouteListenerOverride-{context}[`RouteListenerOverride`]
+|====
+
+[id='type-RouteListenerOverride-{context}']
+### `RouteListenerOverride` schema reference
+
+Used in: xref:type-KafkaListenerExternalRoute-{context}[`KafkaListenerExternalRoute`]
+
+
+[options="header"]
+|====
+|Field             |Description
+|bootstrap  1.2+<.<|External bootstrap service configuration.
+|xref:type-RouteListenerBootstrapOverride-{context}[`RouteListenerBootstrapOverride`]
+|brokers    1.2+<.<|External broker services configuration.
+|xref:type-RouteListenerBrokerOverride-{context}[`RouteListenerBrokerOverride`] array
+|====
+
+[id='type-RouteListenerBootstrapOverride-{context}']
+### `RouteListenerBootstrapOverride` schema reference
+
+Used in: xref:type-RouteListenerOverride-{context}[`RouteListenerOverride`]
+
+
+[options="header"]
+|====
+|Field           |Description
+|address  1.2+<.<|Additional address name for the bootstrap service. The address will be added to the list of subject alternative names of the TLS certificates.
+|string
+|host     1.2+<.<|Host for the bootstrap route. This field will be used in the `spec.host` field of the OpenShift Route.
+|string
+|====
+
+[id='type-RouteListenerBrokerOverride-{context}']
+### `RouteListenerBrokerOverride` schema reference
+
+Used in: xref:type-RouteListenerOverride-{context}[`RouteListenerOverride`]
+
+
+[options="header"]
+|====
+|Field                  |Description
+|broker          1.2+<.<|Id of the kafka broker (broker identifier).
+|integer
+|advertisedHost  1.2+<.<|The host name which will be used in the brokers' `advertised.brokers`.
+|string
+|advertisedPort  1.2+<.<|The port number which will be used in the brokers' `advertised.brokers`.
+|integer
+|host            1.2+<.<|Host for the broker route. This field will be used in the `spec.host` field of the OpenShift Route.
+|string
 |====
 
 [id='type-KafkaListenerExternalLoadBalancer-{context}']
@@ -249,8 +321,55 @@ It must have the value `loadbalancer` for the type `KafkaListenerExternalLoadBal
 
 
 |https://v1-9.docs.kubernetes.io/docs/reference/generated/kubernetes-api/v1.9/#networkpolicypeer-v1-networking[NetworkPolicyPeer] array
+|overrides           1.2+<.<|Overrides for external bootstrap and broker services and externally advertised addresses.
+|xref:type-LoadBalancerListenerOverride-{context}[`LoadBalancerListenerOverride`]
 |tls                 1.2+<.<|Enables TLS encryption on the listener. By default set to `true` for enabled TLS encryption.
 |boolean
+|====
+
+[id='type-LoadBalancerListenerOverride-{context}']
+### `LoadBalancerListenerOverride` schema reference
+
+Used in: xref:type-KafkaListenerExternalLoadBalancer-{context}[`KafkaListenerExternalLoadBalancer`]
+
+
+[options="header"]
+|====
+|Field             |Description
+|bootstrap  1.2+<.<|External bootstrap service configuration.
+|xref:type-LoadBalancerListenerBootstrapOverride-{context}[`LoadBalancerListenerBootstrapOverride`]
+|brokers    1.2+<.<|External broker services configuration.
+|xref:type-LoadBalancerListenerBrokerOverride-{context}[`LoadBalancerListenerBrokerOverride`] array
+|====
+
+[id='type-LoadBalancerListenerBootstrapOverride-{context}']
+### `LoadBalancerListenerBootstrapOverride` schema reference
+
+Used in: xref:type-LoadBalancerListenerOverride-{context}[`LoadBalancerListenerOverride`]
+
+
+[options="header"]
+|====
+|Field           |Description
+|address  1.2+<.<|Additional address name for the bootstrap service. The address will be added to the list of subject alternative names of the TLS certificates.
+|string
+|====
+
+[id='type-LoadBalancerListenerBrokerOverride-{context}']
+### `LoadBalancerListenerBrokerOverride` schema reference
+
+Used in: xref:type-LoadBalancerListenerOverride-{context}[`LoadBalancerListenerOverride`]
+
+
+[options="header"]
+|====
+|Field                  |Description
+|broker          1.2+<.<|Id of the kafka broker (broker identifier).
+|integer
+|advertisedHost  1.2+<.<|The host name which will be used in the brokers' `advertised.brokers`.
+|string
+|advertisedPort  1.2+<.<|The port number which will be used in the brokers' `advertised.brokers`.
+|integer
 |====
 
 [id='type-KafkaListenerExternalNodePort-{context}']
@@ -272,8 +391,59 @@ It must have the value `nodeport` for the type `KafkaListenerExternalNodePort`.
 
 
 |https://v1-9.docs.kubernetes.io/docs/reference/generated/kubernetes-api/v1.9/#networkpolicypeer-v1-networking[NetworkPolicyPeer] array
+|overrides           1.2+<.<|Overrides for external bootstrap and broker services and externally advertised addresses.
+|xref:type-NodePortListenerOverride-{context}[`NodePortListenerOverride`]
 |tls                 1.2+<.<|Enables TLS encryption on the listener. By default set to `true` for enabled TLS encryption.
 |boolean
+|====
+
+[id='type-NodePortListenerOverride-{context}']
+### `NodePortListenerOverride` schema reference
+
+Used in: xref:type-KafkaListenerExternalNodePort-{context}[`KafkaListenerExternalNodePort`]
+
+
+[options="header"]
+|====
+|Field             |Description
+|bootstrap  1.2+<.<|External bootstrap service configuration.
+|xref:type-NodePortListenerBootstrapOverride-{context}[`NodePortListenerBootstrapOverride`]
+|brokers    1.2+<.<|External broker services configuration.
+|xref:type-NodePortListenerBrokerOverride-{context}[`NodePortListenerBrokerOverride`] array
+|====
+
+[id='type-NodePortListenerBootstrapOverride-{context}']
+### `NodePortListenerBootstrapOverride` schema reference
+
+Used in: xref:type-NodePortListenerOverride-{context}[`NodePortListenerOverride`]
+
+
+[options="header"]
+|====
+|Field            |Description
+|address   1.2+<.<|Additional address name for the bootstrap service. The address will be added to the list of subject alternative names of the TLS certificates.
+|string
+|nodePort  1.2+<.<|Node port for the bootstrap service.
+|integer
+|====
+
+[id='type-NodePortListenerBrokerOverride-{context}']
+### `NodePortListenerBrokerOverride` schema reference
+
+Used in: xref:type-NodePortListenerOverride-{context}[`NodePortListenerOverride`]
+
+
+[options="header"]
+|====
+|Field                  |Description
+|broker          1.2+<.<|Id of the kafka broker (broker identifier).
+|integer
+|advertisedHost  1.2+<.<|The host name which will be used in the brokers' `advertised.brokers`.
+|string
+|advertisedPort  1.2+<.<|The port number which will be used in the brokers' `advertised.brokers`.
+|integer
+|nodePort        1.2+<.<|Node port for the broker service.
+|integer
 |====
 
 [id='type-KafkaAuthorizationSimple-{context}']
@@ -514,7 +684,7 @@ Used in: xref:type-KafkaClusterTemplate-{context}[`KafkaClusterTemplate`], xref:
 [options="header"]
 |====
 |Field                  |Description
-|metadata        1.2+<.<|Metadata which should be applied to the resource.
+|metadata        1.2+<.<|Metadata which should be applied to the `PodDistruptionBugetTemplate` resource.
 |xref:type-MetadataTemplate-{context}[`MetadataTemplate`]
 |maxUnavailable  1.2+<.<|Maximum number of unavailable pods to allow voluntary Pod eviction. A Pod eviction will only be allowed when "maxUnavailable" or fewer pods are unavailable after the eviction. Setting this value to 0 will prevent all voluntary evictions and the pods will need to be evicted manually. Defaults to 1.
 |integer
@@ -740,6 +910,8 @@ Configuration of how TLS certificates are used within the cluster. This applies 
 |integer
 |renewalDays                   1.2+<.<|The number of days in the certificate renewal period. This is the number of days before the a certificate expires during which renewal actions may be performed. When `generateCertificateAuthority` is true, this will cause the generation of a new certificate. When `generateCertificateAuthority` is true, this will cause extra logging at WARN level about the pending certificate expiry. Default is 30.
 |integer
+|certificateExpirationPolicy   1.2+<.<|How should CA certificate expiration be handled when `generateCertificateAuthority=true`. The default is for a new CA certificate to be generated reusing the existing private key.
+|string (one of [replace-key, renew-certificate])
 |====
 
 [id='type-KafkaConnect-{context}']
@@ -786,8 +958,8 @@ Used in: xref:type-KafkaConnect-{context}[`KafkaConnect`]
 |map
 |template               1.2+<.<|Template for Kafka Connect and Kafka Connect S2I resources. The template allows users to specify how is the `Deployment`, `Pods` and `Service` generated.
 |xref:type-KafkaConnectTemplate-{context}[`KafkaConnectTemplate`]
-|authentication         1.2+<.<|Authentication configuration for Kafka Connect. The type depends on the value of the `authentication.type` property within the given object, which must be one of [tls, scram-sha-512].
-|xref:type-KafkaConnectAuthenticationTls-{context}[`KafkaConnectAuthenticationTls`], xref:type-KafkaConnectAuthenticationScramSha512-{context}[`KafkaConnectAuthenticationScramSha512`]
+|authentication         1.2+<.<|Authentication configuration for Kafka Connect. The type depends on the value of the `authentication.type` property within the given object, which must be one of [tls, scram-sha-512, plain].
+|xref:type-KafkaConnectAuthenticationTls-{context}[`KafkaConnectAuthenticationTls`], xref:type-KafkaConnectAuthenticationScramSha512-{context}[`KafkaConnectAuthenticationScramSha512`], xref:type-KafkaConnectAuthenticationPlain-{context}[`KafkaConnectAuthenticationPlain`]
 |bootstrapServers       1.2+<.<|Bootstrap servers to connect to. This should be given as a comma separated list of _<hostname>_:‍_<port>_ pairs.
 |string
 |config                 1.2+<.<|The Kafka Connect configuration. Properties with the following prefixes cannot be set: ssl., sasl., security., listeners, plugin.path, rest., bootstrap.servers.
@@ -827,7 +999,7 @@ Used in: xref:type-KafkaConnectS2ISpec-{context}[`KafkaConnectS2ISpec`], xref:ty
 Used in: xref:type-KafkaConnectS2ISpec-{context}[`KafkaConnectS2ISpec`], xref:type-KafkaConnectSpec-{context}[`KafkaConnectSpec`]
 
 
-The `type` property is a discriminator that distinguishes the use of the type `KafkaConnectAuthenticationTls` from xref:type-KafkaConnectAuthenticationScramSha512-{context}[`KafkaConnectAuthenticationScramSha512`].
+The `type` property is a discriminator that distinguishes the use of the type `KafkaConnectAuthenticationTls` from xref:type-KafkaConnectAuthenticationScramSha512-{context}[`KafkaConnectAuthenticationScramSha512`], xref:type-KafkaConnectAuthenticationPlain-{context}[`KafkaConnectAuthenticationPlain`].
 It must have the value `tls` for the type `KafkaConnectAuthenticationTls`.
 [options="header"]
 |====
@@ -861,7 +1033,7 @@ Used in: xref:type-KafkaConnectAuthenticationTls-{context}[`KafkaConnectAuthenti
 Used in: xref:type-KafkaConnectS2ISpec-{context}[`KafkaConnectS2ISpec`], xref:type-KafkaConnectSpec-{context}[`KafkaConnectSpec`]
 
 
-The `type` property is a discriminator that distinguishes the use of the type `KafkaConnectAuthenticationScramSha512` from xref:type-KafkaConnectAuthenticationTls-{context}[`KafkaConnectAuthenticationTls`].
+The `type` property is a discriminator that distinguishes the use of the type `KafkaConnectAuthenticationScramSha512` from xref:type-KafkaConnectAuthenticationTls-{context}[`KafkaConnectAuthenticationTls`], xref:type-KafkaConnectAuthenticationPlain-{context}[`KafkaConnectAuthenticationPlain`].
 It must have the value `scram-sha-512` for the type `KafkaConnectAuthenticationScramSha512`.
 [options="header"]
 |====
@@ -877,7 +1049,7 @@ It must have the value `scram-sha-512` for the type `KafkaConnectAuthenticationS
 [id='type-PasswordSecretSource-{context}']
 ### `PasswordSecretSource` schema reference
 
-Used in: xref:type-KafkaConnectAuthenticationScramSha512-{context}[`KafkaConnectAuthenticationScramSha512`], xref:type-KafkaMirrorMakerAuthenticationScramSha512-{context}[`KafkaMirrorMakerAuthenticationScramSha512`]
+Used in: xref:type-KafkaConnectAuthenticationPlain-{context}[`KafkaConnectAuthenticationPlain`], xref:type-KafkaConnectAuthenticationScramSha512-{context}[`KafkaConnectAuthenticationScramSha512`], xref:type-KafkaMirrorMakerAuthenticationScramSha512-{context}[`KafkaMirrorMakerAuthenticationScramSha512`]
 
 
 [options="header"]
@@ -886,6 +1058,25 @@ Used in: xref:type-KafkaConnectAuthenticationScramSha512-{context}[`KafkaConnect
 |password    1.2+<.<|The name of the key in the Secret under which the password is stored.
 |string
 |secretName  1.2+<.<|The name of the Secret containing the password.
+|string
+|====
+
+[id='type-KafkaConnectAuthenticationPlain-{context}']
+### `KafkaConnectAuthenticationPlain` schema reference
+
+Used in: xref:type-KafkaConnectS2ISpec-{context}[`KafkaConnectS2ISpec`], xref:type-KafkaConnectSpec-{context}[`KafkaConnectSpec`]
+
+
+The `type` property is a discriminator that distinguishes the use of the type `KafkaConnectAuthenticationPlain` from xref:type-KafkaConnectAuthenticationTls-{context}[`KafkaConnectAuthenticationTls`], xref:type-KafkaConnectAuthenticationScramSha512-{context}[`KafkaConnectAuthenticationScramSha512`].
+It must have the value `plain` for the type `KafkaConnectAuthenticationPlain`.
+[options="header"]
+|====
+|Field                  |Description
+|passwordSecret  1.2+<.<|Password used for the authentication.
+|xref:type-PasswordSecretSource-{context}[`PasswordSecretSource`]
+|type            1.2+<.<|Must be `plain`.
+|string
+|username        1.2+<.<|Username used for the authentication.
 |string
 |====
 
@@ -1027,8 +1218,8 @@ Used in: xref:type-KafkaConnectS2I-{context}[`KafkaConnectS2I`]
 |map
 |template                  1.2+<.<|Template for Kafka Connect and Kafka Connect S2I resources. The template allows users to specify how is the `Deployment`, `Pods` and `Service` generated.
 |xref:type-KafkaConnectTemplate-{context}[`KafkaConnectTemplate`]
-|authentication            1.2+<.<|Authentication configuration for Kafka Connect. The type depends on the value of the `authentication.type` property within the given object, which must be one of [tls, scram-sha-512].
-|xref:type-KafkaConnectAuthenticationTls-{context}[`KafkaConnectAuthenticationTls`], xref:type-KafkaConnectAuthenticationScramSha512-{context}[`KafkaConnectAuthenticationScramSha512`]
+|authentication            1.2+<.<|Authentication configuration for Kafka Connect. The type depends on the value of the `authentication.type` property within the given object, which must be one of [tls, scram-sha-512, plain].
+|xref:type-KafkaConnectAuthenticationTls-{context}[`KafkaConnectAuthenticationTls`], xref:type-KafkaConnectAuthenticationScramSha512-{context}[`KafkaConnectAuthenticationScramSha512`], xref:type-KafkaConnectAuthenticationPlain-{context}[`KafkaConnectAuthenticationPlain`]
 |bootstrapServers          1.2+<.<|Bootstrap servers to connect to. This should be given as a comma separated list of _<hostname>_:‍_<port>_ pairs.
 |string
 |config                    1.2+<.<|The Kafka Connect configuration. Properties with the following prefixes cannot be set: ssl., sasl., security., listeners, plugin.path, rest., bootstrap.servers.

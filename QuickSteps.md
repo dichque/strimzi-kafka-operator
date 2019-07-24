@@ -322,4 +322,6 @@ Strimzi operator is built using java, the images are
 export JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk1.8.0_181.jdk/Contents/Home
 export MVN_ARGS="-DskipTests -DskipITs"
 make docker_build
+
+Incase of maven dependency error, run `mvn install`
 ```

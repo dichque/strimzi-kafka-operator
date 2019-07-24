@@ -8,7 +8,9 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
 import io.strimzi.crdgenerator.annotations.Description;
+import io.strimzi.crdgenerator.annotations.Minimum;
 import io.sundr.builder.annotations.Buildable;
+import lombok.EqualsAndHashCode;
 
 import java.util.Map;
 
@@ -22,7 +24,8 @@ import java.util.Map;
 )
 @JsonPropertyOrder({"type", "size", "storageClass", "selector", "deleteClaim"})
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public class PersistentClaimStorage extends Storage {
+@EqualsAndHashCode
+public class PersistentClaimStorage extends SingleVolumeStorage {
 
     private static final long serialVersionUID = 1L;
 
@@ -31,10 +34,25 @@ public class PersistentClaimStorage extends Storage {
     private Map<String, String> selector;
     private boolean deleteClaim;
 
+    private Integer id;
+
     @Description("Must be `" + TYPE_PERSISTENT_CLAIM + "`")
     @Override
     public String getType() {
         return TYPE_PERSISTENT_CLAIM;
+    }
+
+    @Override
+    @Description("Storage identification number. It is mandatory only for storage volumes defined in a storage of type 'jbod'")
+    @Minimum(0)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public Integer getId() {
+        return super.getId();
+    }
+
+    @Override
+    public void setId(Integer id) {
+        super.setId(id);
     }
 
     @Description("When type=persistent-claim, defines the size of the persistent volume claim (i.e 1Gi). " +

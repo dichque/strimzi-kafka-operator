@@ -10,6 +10,7 @@ The build also uses an Java annotation processor. Some IDEs (such as IntelliJ) d
 - [Build Pre-requisites](#build-pre-requisites)
 - [Docker images](#docker-images)
     - [Building Docker images](#building-docker-images)
+    - [Alternate Docker image JRE](#alternate-docker-image-jre)
     - [Tagging and pushing Docker images](#tagging-and-pushing-docker-images)
 - [Building everything](#building-everything)
 - [Pushing images to the cluster's Docker repo](#pushing-images-to-the-clusters-docker-repo)
@@ -55,6 +56,23 @@ The `docker_build` target will always build the images under the
 the base image you might have just built without modifying all Dockerfiles. 
 The `DOCKER_TAG` environment variable configures the Docker tag 
 to use (default is `latest`).
+
+### Alternate Docker image JRE
+
+The docker images can be built with an alternate java version by setting the environment variable
+`JAVA_VERSION`.  For example, to build docker images that have the java 11 JRE installed use
+`JAVA_VERSION=11 make docker_build`.  If not present, JAVA_VERSION is defaulted to **1.8.0**.
+
+If `JAVA_VERSION` environment variable is set, a profile in the parent pom.xml will set the
+`maven.compiler.source` and `maven.compiler.target` properties.
+
+### Alternate Docker base image
+
+The docker images can be built with an alternate container OS version by adding the environment
+variable ```ALTERNATE_BASE```.  When this environment variable is set, for each component the build
+will look for a Dockerfile in the subdirectory named by ```ALTERNATE_BASE```.  For example, to build
+docker images based on alpine, use `ALTERNATE_BASE=alpine make docker_build`.  Alternate docker
+images are an experimental feature not supported by the core Strimzi team.
 
 ### Tagging and pushing Docker images
 
@@ -166,8 +184,9 @@ Attach the TAR.GZ/ZIP archives, YAML files (for installation from URL) and the H
 9. Update the website
   * Add release documentation to `strimzi.github.io/docs/`.  Update references to docs in 
   `strimzi.github.io/documentation/index.md`.
-  * Update the Helm Chart repository file by copying `strimzi-kafka-operator/helm-charts/index.yaml` to 
-  `strimzi.github.io/charts/index.yaml`. 
+  * Update the Helm Chart repository file by copying `strimzi-kafka-operator/helm-charts/index.yaml` to
+  `strimzi.github.io/charts/index.yaml`.
+  * Update the Quickstarts for OKD and Minikube to use the latest stuff.
 10. The maven artifacts (`api` module) will be automatically staged from TravisCI during the tag build. 
 It has to be releases from [Sonatype](https://oss.sonatype.org/#stagingRepositories) to get to the main Maven repositories.
 
@@ -198,9 +217,22 @@ Use the `test` build goal and provide a `-Dtest=TestClassName[#testMethodName]` 
 
 Ex)
 
-    mvn test -pl systemtest -Djava.net.preferIPv4Stack=true -DtrimStackTrace=false -DjunitTags=acceptance,regression -Dtest=KafkaST#testKafkaAndZookeeperScaleUpScaleDown
+    mvn test -pl systemtest -P systemtests -Djava.net.preferIPv4Stack=true -DtrimStackTrace=false -DjunitTags=acceptance,regression -Dtest=KafkaST#testKafkaAndZookeeperScaleUpScaleDown
 
 
 ### Log level
 
 To set the log level of Strimzi for system tests need to add system property `TEST_STRIMZI_LOG_LEVEL` with one of the following values: `ERROR`, `WARNING`, `INFO`, `DEBUG`, `TRACE`.
+
+### Test Cluster
+
+The integration and system tests are run against a cluster specified in the environment variable `TEST_CLUSTER_CONTEXT`. 
+If this variable is not set, kubernetes client will use currently active context. Otherwise will use context from kubeconfig with name specified by `TEST_CLUSTER_CONTEXT` variable.
+
+For example command `TEST_CLUSTER_CONTEXT=remote-cluster ./systemtest/scripts/run_tests.sh` will execute tests with cluster context `remote-cluster`.
+However, since system tests use command line `Executor` for some actions, make sure that you are using context from `TEST_CLUSTER_CONTEXT`.
+
+System tests uses admin user for some actions. You can specify admin user via variable `TEST_CLUSTER_ADMIN` (by default it use `developer` because `system:admin` cannot be used over remote connections).
+
+### Execute ST with custom Kafka version
+To set custom Kafka version in system tests need to add system property `ST_KAFKA_VERSION` with one of the following values: `2.0.0`, `2.0.1`, `2.1.0`

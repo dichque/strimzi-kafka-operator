@@ -33,9 +33,6 @@ import static java.util.Arrays.asList;
  * Represents the Entity Operator deployment
  */
 public class EntityOperator extends AbstractModel {
-
-    private static final String NAME_SUFFIX = "-entity-operator";
-    private static final String CERTS_SUFFIX = NAME_SUFFIX + "-certs";
     protected static final String TLS_SIDECAR_NAME = "tls-sidecar";
     protected static final String TLS_SIDECAR_EO_CERTS_VOLUME_NAME = "eo-certs";
     protected static final String TLS_SIDECAR_EO_CERTS_VOLUME_MOUNT = "/etc/tls-sidecar/eo-certs/";
@@ -102,7 +99,7 @@ public class EntityOperator extends AbstractModel {
     }
 
     public static String secretName(String cluster) {
-        return cluster + CERTS_SUFFIX;
+        return KafkaResources.entityOperatorSecretName(cluster);
     }
 
     public void setDeployed(boolean isDeployed) {
@@ -168,7 +165,7 @@ public class EntityOperator extends AbstractModel {
         return null;
     }
 
-    public Deployment generateDeployment(boolean isOpenShift, Map<String, String> annotations) {
+    public Deployment generateDeployment(boolean isOpenShift, Map<String, String> annotations, ImagePullPolicy imagePullPolicy) {
 
         if (!isDeployed()) {
             log.warn("Topic and/or User Operators not declared: Entity Operator will not be deployed");
@@ -184,21 +181,21 @@ public class EntityOperator extends AbstractModel {
                 Collections.emptyMap(),
                 annotations,
                 getMergedAffinity(),
-                getInitContainers(),
-                getContainers(),
+                getInitContainers(imagePullPolicy),
+                getContainers(imagePullPolicy),
                 getVolumes(isOpenShift)
         );
     }
 
     @Override
-    protected List<Container> getContainers() {
+    protected List<Container> getContainers(ImagePullPolicy imagePullPolicy) {
         List<Container> containers = new ArrayList<>();
 
         if (topicOperator != null) {
-            containers.addAll(topicOperator.getContainers());
+            containers.addAll(topicOperator.getContainers(imagePullPolicy));
         }
         if (userOperator != null) {
-            containers.addAll(userOperator.getContainers());
+            containers.addAll(userOperator.getContainers(imagePullPolicy));
         }
 
         String tlsSidecarImage = EntityOperatorSpec.DEFAULT_TLS_SIDECAR_IMAGE;
@@ -217,6 +214,7 @@ public class EntityOperator extends AbstractModel {
                 .withVolumeMounts(createVolumeMount(TLS_SIDECAR_EO_CERTS_VOLUME_NAME, TLS_SIDECAR_EO_CERTS_VOLUME_MOUNT),
                         createVolumeMount(TLS_SIDECAR_CA_CERTS_VOLUME_NAME, TLS_SIDECAR_CA_CERTS_VOLUME_MOUNT))
                 .withLifecycle(new LifecycleBuilder().withNewPreStop().withNewExec().withCommand("/opt/stunnel/stunnel_pre_stop.sh", String.valueOf(templateTerminationGracePeriodSeconds)).endExec().endPreStop().build())
+                .withImagePullPolicy(determineImagePullPolicy(imagePullPolicy, tlsSidecarImage))
                 .build();
 
         containers.add(tlsSidecarContainer);
@@ -249,7 +247,7 @@ public class EntityOperator extends AbstractModel {
             return null;
         }
         Secret secret = clusterCa.entityOperatorSecret();
-        return ModelUtils.buildSecret(clusterCa, secret, namespace, EntityOperator.secretName(cluster), "entity-operator", labels, createOwnerReference());
+        return ModelUtils.buildSecret(clusterCa, secret, namespace, EntityOperator.secretName(cluster), name, "entity-operator", labels, createOwnerReference());
     }
 
     /**

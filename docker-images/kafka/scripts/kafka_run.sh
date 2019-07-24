@@ -1,18 +1,19 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set +x
-
-# volume for saving Kafka server logs
-export KAFKA_VOLUME="/var/lib/kafka/"
-# base name for Kafka server data dir
-export KAFKA_LOG_BASE_NAME="kafka-log"
-export KAFKA_APP_LOGS_BASE_NAME="logs"
 
 export KAFKA_BROKER_ID=$(hostname | awk -F'-' '{print $NF}')
 echo "KAFKA_BROKER_ID=$KAFKA_BROKER_ID"
 
-# create data dir
-export KAFKA_LOG_DIRS=$KAFKA_VOLUME$KAFKA_LOG_BASE_NAME$KAFKA_BROKER_ID
-echo "KAFKA_LOG_DIRS=$KAFKA_LOG_DIRS"
+# Kafka server data dirs
+export KAFKA_LOG_DIR_PATH="kafka-log${KAFKA_BROKER_ID}"
+
+for DIR in $(echo $KAFKA_LOG_DIRS | tr ',' ' ')  ; do
+  export KAFKA_LOG_DIRS_WITH_PATH="${KAFKA_LOG_DIRS_WITH_PATH},${DIR}/${KAFKA_LOG_DIR_PATH}"
+done
+
+export KAFKA_LOG_DIRS_WITH_PATH="${KAFKA_LOG_DIRS_WITH_PATH:1}"
+
+echo "KAFKA_LOG_DIRS=$KAFKA_LOG_DIRS_WITH_PATH"
 
 # Disable Kafka's GC logging (which logs to a file)...
 export GC_LOG_ENABLED="false"
@@ -59,8 +60,7 @@ if [ -z "$KAFKA_HEAP_OPTS" -a -n "${DYNAMIC_HEAP_FRACTION}" ]; then
     fi
 fi
 
-# exporting the GC options env var recognized by the Kafka scripts
-export KAFKA_GC_LOG_OPTS=$STRIMZI_KAFKA_GC_LOG_OPTS
+. ./set_kafka_gc_options.sh
 
 # starting Kafka server with final configuration
 exec $KAFKA_HOME/bin/kafka-server-start.sh /tmp/strimzi.properties

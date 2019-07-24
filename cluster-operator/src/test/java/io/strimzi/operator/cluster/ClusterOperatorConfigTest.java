@@ -4,6 +4,7 @@
  */
 package io.strimzi.operator.cluster;
 
+import io.strimzi.operator.cluster.model.ImagePullPolicy;
 import io.strimzi.operator.cluster.model.KafkaVersion;
 import io.strimzi.operator.common.InvalidConfigurationException;
 import org.junit.Test;
@@ -17,6 +18,9 @@ import static java.util.Arrays.asList;
 import static java.util.Collections.emptyMap;
 import static java.util.Collections.singleton;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertFalse;
 
 public class ClusterOperatorConfigTest {
 
@@ -45,7 +49,7 @@ public class ClusterOperatorConfigTest {
     @Test
     public void testReconciliationInterval() {
 
-        ClusterOperatorConfig config = new ClusterOperatorConfig(singleton("namespace"), 60_000, 30_000, false, new KafkaVersion.Lookup(emptyMap(), emptyMap(), emptyMap(), emptyMap()));
+        ClusterOperatorConfig config = new ClusterOperatorConfig(singleton("namespace"), 60_000, 30_000, false, new KafkaVersion.Lookup(emptyMap(), emptyMap(), emptyMap(), emptyMap()), null, null);
 
         assertEquals(singleton("namespace"), config.getNamespaces());
         assertEquals(60_000, config.getReconciliationIntervalMs());
@@ -77,28 +81,128 @@ public class ClusterOperatorConfigTest {
 
     @Test
     public void testListOfNamespaces() {
-
         Map<String, String> envVars = new HashMap<>(ClusterOperatorConfigTest.envVars);
-        envVars.put(ClusterOperatorConfig.STRIMZI_NAMESPACE, "foo, bar ,, baz , ");
+        envVars.put(ClusterOperatorConfig.STRIMZI_NAMESPACE, "foo,bar,baz");
 
         ClusterOperatorConfig config = ClusterOperatorConfig.fromMap(envVars);
         assertEquals(new HashSet<>(asList("foo", "bar", "baz")), config.getNamespaces());
-        assertEquals(30_000, config.getReconciliationIntervalMs());
-        assertEquals(30_000, config.getOperationTimeoutMs());
     }
 
-    @Test(expected = InvalidConfigurationException.class)
-    public void testNoNamespace() {
+    @Test
+    public void testListOfNamespacesWithSpaces() {
+        Map<String, String> envVars = new HashMap<>(ClusterOperatorConfigTest.envVars);
+        envVars.put(ClusterOperatorConfig.STRIMZI_NAMESPACE, " foo ,bar , baz ");
 
+        ClusterOperatorConfig config = ClusterOperatorConfig.fromMap(envVars);
+        assertEquals(new HashSet<>(asList("foo", "bar", "baz")), config.getNamespaces());
+    }
+
+    @Test
+    public void testNoNamespace() {
         Map<String, String> envVars = new HashMap<>(ClusterOperatorConfigTest.envVars);
         envVars.remove(ClusterOperatorConfig.STRIMZI_NAMESPACE);
 
-        ClusterOperatorConfig.fromMap(envVars);
+        ClusterOperatorConfig config = ClusterOperatorConfig.fromMap(envVars);
+        assertEquals(new HashSet<>(asList("*")), config.getNamespaces());
+    }
+
+    @Test
+    public void testEmptyEnvVars() {
+        ClusterOperatorConfig config = ClusterOperatorConfig.fromMap(Collections.emptyMap());
+        assertEquals(new HashSet<>(asList("*")), config.getNamespaces());
+    }
+
+    @Test
+    public void testAnyNamespace() {
+        Map<String, String> envVars = new HashMap<>(ClusterOperatorConfigTest.envVars);
+        envVars.put(ClusterOperatorConfig.STRIMZI_NAMESPACE, "*");
+
+        ClusterOperatorConfig config = ClusterOperatorConfig.fromMap(envVars);
+        assertEquals(new HashSet<>(asList("*")), config.getNamespaces());
+    }
+
+    @Test
+    public void testAnyNamespaceWithSpaces() {
+        Map<String, String> envVars = new HashMap<>(ClusterOperatorConfigTest.envVars);
+        envVars.put(ClusterOperatorConfig.STRIMZI_NAMESPACE, " * ");
+
+        ClusterOperatorConfig config = ClusterOperatorConfig.fromMap(envVars);
+        assertEquals(new HashSet<>(asList("*")), config.getNamespaces());
     }
 
     @Test(expected = InvalidConfigurationException.class)
-    public void testEmptyEnvVars() {
+    public void testAnyNamespaceInList() {
+        Map<String, String> envVars = new HashMap<>(ClusterOperatorConfigTest.envVars);
+        envVars.put(ClusterOperatorConfig.STRIMZI_NAMESPACE, "foo,*,bar,baz");
 
-        ClusterOperatorConfig.fromMap(Collections.emptyMap());
+        ClusterOperatorConfig config = ClusterOperatorConfig.fromMap(envVars);
+    }
+
+    @Test
+    public void testImagePullPolicyNotDefined() {
+        assertNull(ClusterOperatorConfig.fromMap(envVars).getImagePullPolicy());
+    }
+
+    @Test
+    public void testImagePullPolicyValidValues() {
+        Map<String, String> envVars = new HashMap<>(ClusterOperatorConfigTest.envVars);
+        envVars.put(ClusterOperatorConfig.STRIMZI_IMAGE_PULL_POLICY, "Always");
+        assertEquals(ImagePullPolicy.ALWAYS, ClusterOperatorConfig.fromMap(envVars).getImagePullPolicy());
+
+        envVars.put(ClusterOperatorConfig.STRIMZI_IMAGE_PULL_POLICY, "IfNotPresent");
+        assertEquals(ImagePullPolicy.IFNOTPRESENT, ClusterOperatorConfig.fromMap(envVars).getImagePullPolicy());
+
+        envVars.put(ClusterOperatorConfig.STRIMZI_IMAGE_PULL_POLICY, "Never");
+        assertEquals(ImagePullPolicy.NEVER, ClusterOperatorConfig.fromMap(envVars).getImagePullPolicy());
+    }
+
+    @Test
+    public void testImagePullPolicyUpperLowerCase() {
+        Map<String, String> envVars = new HashMap<>(ClusterOperatorConfigTest.envVars);
+        envVars.put(ClusterOperatorConfig.STRIMZI_IMAGE_PULL_POLICY, "ALWAYS");
+        assertEquals(ImagePullPolicy.ALWAYS, ClusterOperatorConfig.fromMap(envVars).getImagePullPolicy());
+
+        envVars.put(ClusterOperatorConfig.STRIMZI_IMAGE_PULL_POLICY, "always");
+        assertEquals(ImagePullPolicy.ALWAYS, ClusterOperatorConfig.fromMap(envVars).getImagePullPolicy());
+
+        envVars.put(ClusterOperatorConfig.STRIMZI_IMAGE_PULL_POLICY, "Always");
+        assertEquals(ImagePullPolicy.ALWAYS, ClusterOperatorConfig.fromMap(envVars).getImagePullPolicy());
+    }
+
+    @Test(expected = InvalidConfigurationException.class)
+    public void testInvalidImagePullPolicy() {
+        Map<String, String> envVars = new HashMap<>(ClusterOperatorConfigTest.envVars);
+        envVars.put(ClusterOperatorConfig.STRIMZI_IMAGE_PULL_POLICY, "Sometimes");
+
+        ClusterOperatorConfig config = ClusterOperatorConfig.fromMap(envVars);
+    }
+
+    @Test
+    public void testForceOpenShift() {
+        ClusterOperatorConfig config;
+        Map<String, String> envVars;
+
+        envVars = new HashMap<>(1);
+        envVars.put(ClusterOperatorConfig.STRIMZI_NAMESPACE, "namespace");
+        config = ClusterOperatorConfig.fromMap(envVars);
+        assertNull(config.isAssumeOpenShift());
+
+        envVars = new HashMap<>(2);
+        envVars.put(ClusterOperatorConfig.STRIMZI_NAMESPACE, "namespace");
+        envVars.put(ClusterOperatorConfig.STRIMZI_ASSUME_OPENSHIFT, "TRUE");
+        config = ClusterOperatorConfig.fromMap(envVars);
+        assertTrue(config.isAssumeOpenShift());
+
+        envVars = new HashMap<>(2);
+        envVars.put(ClusterOperatorConfig.STRIMZI_NAMESPACE, "namespace");
+        envVars.put(ClusterOperatorConfig.STRIMZI_ASSUME_OPENSHIFT, "FALSE");
+        config = ClusterOperatorConfig.fromMap(envVars);
+        assertFalse(config.isAssumeOpenShift());
+
+        envVars = new HashMap<>(2);
+        envVars.put(ClusterOperatorConfig.STRIMZI_NAMESPACE, "namespace");
+        envVars.put(ClusterOperatorConfig.STRIMZI_ASSUME_OPENSHIFT, "something");
+        config = ClusterOperatorConfig.fromMap(envVars);
+        assertFalse(config.isAssumeOpenShift());
     }
 }

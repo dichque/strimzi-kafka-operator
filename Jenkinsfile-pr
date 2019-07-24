@@ -1,0 +1,78 @@
+#!/usr/bin/env groovy
+
+def lib = evaluate readTrusted('./jenkins.groovy')
+
+pipeline {
+    agent {
+        node {
+            label 'strimzi-pr'
+        }
+    }
+    parameters {
+        //execute all tests as default for each new Pull request
+        string(name: 'JUNIT_TAGS', defaultValue: 'acceptance,regression', description: 'maven parameter for executing specific tests')
+    }
+    options {
+        timeout(time: 7, unit: 'HOURS')
+        ansiColor('xterm')
+    }
+    environment {
+        DOCKER_ORG="strimzi"
+        DOCKER_REGISTRY="docker.io"
+        DOCKER_TAG="pr"
+        OPENSHIFT_URL="https://github.com/openshift/origin/releases/download/v3.11.0/openshift-origin-client-tools-v3.11.0-0cbc58b-linux-64bit.tar.gz"
+
+        ARTIFACTS_DIR = 'systemtest/target/logs'
+
+        JOB_NAME_SUB = "${String.format("%.15s", JOB_NAME).toLowerCase()}"
+    }
+    stages {
+        stage('Clean WS') {
+            steps {
+                cleanWs()
+            }
+        }
+        stage('Checkout Strimzi') {
+            steps {
+                checkout scm
+            }
+        }
+        stage('Start Openshift') {
+            steps {
+                timeout(time: 25, unit: 'MINUTES') {
+                    script {
+                        lib.setupEnvironment(env.WORKSPACE, env.OPENSHIFT_URL)
+                    }
+                }
+            }
+        }
+        stage('Build images') {
+            steps {
+                script {
+                    lib.buildStrimzi()
+                }
+            }
+        }
+        stage('Execute system tests') {
+            steps {
+                script {
+                    echo "stage execute"
+                    lib.runSystemTests(env.WORKSPACE, params.JUNIT_TAGS)
+                }
+            }
+        }
+    }
+    post {
+        always {
+            script {
+                lib.postAction(env.ARTIFACTS_DIR, env.JOB_NAME, env.BUILD_URL, env.WORKSPACE)
+            }
+        }
+        failure {
+            echo "Build failed"
+            script {
+                lib.sendMail(env.STRIMZI_MAILING_LIST, "failed", env.JOB_NAME, env.BUILD_URL)
+            }
+        }
+    }
+}

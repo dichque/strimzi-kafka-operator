@@ -1,9 +1,12 @@
 FROM centos:7
 
+ARG JAVA_VERSION
 ARG KAFKA_SHA512
 ARG KAFKA_VERSION
 
-RUN yum -y install java-1.8.0-openjdk-headless gettext nmap-ncat openssl && yum clean all -y
+RUN yum -y update \
+    && yum -y install java-${JAVA_VERSION}-openjdk-headless gettext nmap-ncat openssl \
+    && yum clean all -y
 
 # set Kafka home folder
 ENV KAFKA_HOME=/opt/kafka
@@ -31,7 +34,7 @@ RUN curl -O https://repo1.maven.org/maven2/io/prometheus/jmx/jmx_prometheus_java
     && rm -rf jmx_prometheus_javaagent-${JMX_EXPORTER_VERSION}.*
 
 # Downloading/extracting Apache Kafka
-RUN curl -O https://www.apache.org/dist/kafka/${KAFKA_VERSION}/kafka_${SCALA_VERSION}-${KAFKA_VERSION}.tgz \
+RUN curl -O https://archive.apache.org/dist/kafka/${KAFKA_VERSION}/kafka_${SCALA_VERSION}-${KAFKA_VERSION}.tgz \
     && echo $KAFKA_CHECKSUM > kafka_${SCALA_VERSION}-${KAFKA_VERSION}.tgz.sha512 \
     && sha512sum --check kafka_${SCALA_VERSION}-${KAFKA_VERSION}.tgz.sha512 \
     && mkdir $KAFKA_HOME \

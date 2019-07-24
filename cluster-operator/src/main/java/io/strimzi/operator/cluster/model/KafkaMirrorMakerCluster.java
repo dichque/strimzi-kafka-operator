@@ -95,7 +95,6 @@ public class KafkaMirrorMakerCluster extends AbstractModel {
         super(namespace, cluster, labels);
         this.name = kafkaMirrorMakerClusterName(cluster);
         this.serviceName = serviceName(cluster);
-        this.validLoggerFields = getDefaultLogConfig();
         this.ancillaryConfigName = logAndMetricsConfigName(cluster);
         this.replicas = DEFAULT_REPLICAS;
         this.readinessPath = "/";
@@ -163,21 +162,26 @@ public class KafkaMirrorMakerCluster extends AbstractModel {
 
         kafkaMirrorMakerCluster.setReplicas(kafkaMirrorMaker.getSpec() != null && kafkaMirrorMaker.getSpec().getReplicas() > 0 ? kafkaMirrorMaker.getSpec().getReplicas() : DEFAULT_REPLICAS);
 
-        if (kafkaMirrorMaker.getSpec() != null) {
-            kafkaMirrorMakerCluster.setWhitelist(kafkaMirrorMaker.getSpec().getWhitelist());
-            kafkaMirrorMakerCluster.setProducer(kafkaMirrorMaker.getSpec().getProducer());
-            kafkaMirrorMakerCluster.setConsumer(kafkaMirrorMaker.getSpec().getConsumer());
-            kafkaMirrorMakerCluster.setImage(versions.kafkaMirrorMakerImage(
-                    kafkaMirrorMaker.getSpec().getImage(),
-                    kafkaMirrorMaker.getSpec().getVersion()));
-            kafkaMirrorMakerCluster.setLogging(kafkaMirrorMaker.getSpec().getLogging());
-            kafkaMirrorMakerCluster.setGcLoggingEnabled(kafkaMirrorMaker.getSpec().getJvmOptions() == null ? true : kafkaMirrorMaker.getSpec().getJvmOptions().isGcLoggingEnabled());
+        kafkaMirrorMakerCluster.setResources(kafkaMirrorMaker.getSpec().getResources());
 
-            Map<String, Object> metrics = kafkaMirrorMaker.getSpec().getMetrics();
-            if (metrics != null) {
-                kafkaMirrorMakerCluster.setMetricsEnabled(true);
-                kafkaMirrorMakerCluster.setMetricsConfig(metrics.entrySet());
-            }
+        kafkaMirrorMakerCluster.setWhitelist(kafkaMirrorMaker.getSpec().getWhitelist());
+        kafkaMirrorMakerCluster.setProducer(kafkaMirrorMaker.getSpec().getProducer());
+        kafkaMirrorMakerCluster.setConsumer(kafkaMirrorMaker.getSpec().getConsumer());
+
+        String image = versions.kafkaMirrorMakerImage(kafkaMirrorMaker.getSpec().getImage(), kafkaMirrorMaker.getSpec().getVersion());
+        if (image == null) {
+            throw new InvalidResourceException("Version " + kafkaMirrorMaker.getSpec().getVersion() + " is not supported. Supported versions are: " + String.join(", ", versions.supportedVersions()) + ".");
+        }
+        kafkaMirrorMakerCluster.setImage(image);
+
+        kafkaMirrorMakerCluster.setLogging(kafkaMirrorMaker.getSpec().getLogging());
+        kafkaMirrorMakerCluster.setGcLoggingEnabled(kafkaMirrorMaker.getSpec().getJvmOptions() == null ? true : kafkaMirrorMaker.getSpec().getJvmOptions().isGcLoggingEnabled());
+        kafkaMirrorMakerCluster.setJvmOptions(kafkaMirrorMaker.getSpec().getJvmOptions());
+
+        Map<String, Object> metrics = kafkaMirrorMaker.getSpec().getMetrics();
+        if (metrics != null) {
+            kafkaMirrorMakerCluster.setMetricsEnabled(true);
+            kafkaMirrorMakerCluster.setMetricsConfig(metrics.entrySet());
         }
 
         setClientAuth(kafkaMirrorMakerCluster, kafkaMirrorMaker.getSpec().getConsumer());
@@ -296,7 +300,7 @@ public class KafkaMirrorMakerCluster extends AbstractModel {
         return volumeMountList;
     }
 
-    public Deployment generateDeployment(Map<String, String> annotations, boolean isOpenShift) {
+    public Deployment generateDeployment(Map<String, String> annotations, boolean isOpenShift, ImagePullPolicy imagePullPolicy) {
         DeploymentStrategy updateStrategy = new DeploymentStrategyBuilder()
                 .withType("RollingUpdate")
                 .withRollingUpdate(new RollingUpdateDeploymentBuilder()
@@ -310,13 +314,13 @@ public class KafkaMirrorMakerCluster extends AbstractModel {
                 Collections.emptyMap(),
                 annotations,
                 getMergedAffinity(),
-                getInitContainers(),
-                getContainers(),
+                getInitContainers(imagePullPolicy),
+                getContainers(imagePullPolicy),
                 getVolumes(isOpenShift));
     }
 
     @Override
-    protected List<Container> getContainers() {
+    protected List<Container> getContainers(ImagePullPolicy imagePullPolicy) {
 
         List<Container> containers = new ArrayList<>();
 
@@ -327,6 +331,7 @@ public class KafkaMirrorMakerCluster extends AbstractModel {
                 .withPorts(getContainerPortList())
                 .withVolumeMounts(getVolumeMounts())
                 .withResources(ModelUtils.resources(getResources()))
+                .withImagePullPolicy(determineImagePullPolicy(imagePullPolicy, getImage()))
                 .build();
 
         containers.add(container);
@@ -349,7 +354,7 @@ public class KafkaMirrorMakerCluster extends AbstractModel {
         if (consumer.getNumStreams() != null) {
             varList.add(buildEnvVar(ENV_VAR_KAFKA_MIRRORMAKER_NUMSTREAMS, Integer.toString(consumer.getNumStreams())));
         }
-        varList.add(buildEnvVar(ENV_VAR_STRIMZI_KAFKA_GC_LOG_OPTS, getGcLoggingOptions()));
+        varList.add(buildEnvVar(ENV_VAR_STRIMZI_KAFKA_GC_LOG_ENABLED, String.valueOf(gcLoggingEnabled)));
 
         heapOptions(varList, 1.0, 0L);
         jvmPerformanceOptions(varList);

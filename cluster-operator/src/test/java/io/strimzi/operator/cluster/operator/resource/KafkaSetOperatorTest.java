@@ -41,8 +41,8 @@ public class KafkaSetOperatorTest {
     @Before
     public void before() {
         KafkaVersion.Lookup versions = new KafkaVersion.Lookup(emptyMap(), emptyMap(), emptyMap(), emptyMap());
-        a = KafkaCluster.fromCrd(getResource(), versions).generateStatefulSet(true);
-        b = KafkaCluster.fromCrd(getResource(), versions).generateStatefulSet(true);
+        a = KafkaCluster.fromCrd(getResource(), versions).generateStatefulSet(true, null);
+        b = KafkaCluster.fromCrd(getResource(), versions).generateStatefulSet(true, null);
     }
 
     private Kafka getResource() {
@@ -56,11 +56,11 @@ public class KafkaSetOperatorTest {
                 replicas, image, healthDelay, healthTimeout))
                 .editSpec()
                     .editKafka()
-                        .withNewPersistentClaimStorageStorage()
+                        .withNewPersistentClaimStorage()
                             .withSize("123")
                             .withStorageClass("foo")
                             .withDeleteClaim(true)
-                            .endPersistentClaimStorageStorage()
+                            .endPersistentClaimStorage()
                         .withLogging(KAFKA_LOG_CONFIG)
                     .endKafka()
                     .editZookeeper()

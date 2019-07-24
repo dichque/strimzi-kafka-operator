@@ -25,18 +25,14 @@ import static org.junit.Assert.assertTrue;
 
 public class ZookeeperSetOperatorTest {
 
-    //public static final Map<String, Object> METRICS_CONFIG = singletonMap("foo", "bar");
-    //public static final Map<String, Object> LOG_ZOOKEEPER_CONFIG = singletonMap("zookeeper.root.logger", "INFO");
-    //public static final Map<String, Object> LOG_KAFKA_CONFIG = singletonMap("kafka.root.logger.level", "INFO");
-
     private StatefulSet a;
     private StatefulSet b;
 
     @Before
     public void before() {
         KafkaVersion.Lookup versions = new KafkaVersion.Lookup(emptyMap(), emptyMap(), emptyMap(), emptyMap());
-        a = ZookeeperCluster.fromCrd(getResource(), versions).generateStatefulSet(true);
-        b = ZookeeperCluster.fromCrd(getResource(), versions).generateStatefulSet(true);
+        a = ZookeeperCluster.fromCrd(getResource(), versions).generateStatefulSet(true, null);
+        b = ZookeeperCluster.fromCrd(getResource(), versions).generateStatefulSet(true, null);
     }
 
     private Kafka getResource() {

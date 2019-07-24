@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # volume for saving Zookeeper server logs
 export ZOOKEEPER_VOLUME="/var/lib/zookeeper/"
@@ -49,8 +49,7 @@ if [ -z "$KAFKA_HEAP_OPTS" -a -n "${DYNAMIC_HEAP_FRACTION}" ]; then
     fi
 fi
 
-# exporting the GC options env var recognized by the Kafka scripts
-export KAFKA_GC_LOG_OPTS=$STRIMZI_KAFKA_GC_LOG_OPTS
+. ./set_kafka_gc_options.sh
 
 # starting Zookeeper with final configuration
 exec $KAFKA_HOME/bin/zookeeper-server-start.sh /tmp/zookeeper.properties

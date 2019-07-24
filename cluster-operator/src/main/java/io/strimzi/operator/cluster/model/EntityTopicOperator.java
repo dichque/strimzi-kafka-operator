@@ -83,7 +83,6 @@ public class EntityTopicOperator extends AbstractModel {
         this.ancillaryConfigName = metricAndLogConfigsName(cluster);
         this.logAndMetricsConfigVolumeName = "entity-topic-operator-metrics-and-logging";
         this.logAndMetricsConfigMountPath = "/opt/topic-operator/custom-config/";
-        this.validLoggerFields = getDefaultLogConfig();
     }
 
     public void setWatchedNamespace(String watchedNamespace) {
@@ -175,11 +174,6 @@ public class EntityTopicOperator extends AbstractModel {
         return "log4j2.properties";
     }
 
-    @Override
-    public String getGcLoggingOptions() {
-        return gcLoggingEnabled ? DEFAULT_STRIMZI_GC_LOGGING : " ";
-    }
-
     /**
      * Create an Entity Topic Operator from given desired resource
      *
@@ -215,7 +209,7 @@ public class EntityTopicOperator extends AbstractModel {
     }
 
     @Override
-    protected List<Container> getContainers() {
+    protected List<Container> getContainers(ImagePullPolicy imagePullPolicy) {
 
         return Collections.singletonList(new ContainerBuilder()
                 .withName(TOPIC_OPERATOR_CONTAINER_NAME)
@@ -226,6 +220,7 @@ public class EntityTopicOperator extends AbstractModel {
                 .withReadinessProbe(createHttpProbe(readinessPath + "ready", HEALTHCHECK_PORT_NAME, readinessInitialDelay, readinessTimeout))
                 .withResources(ModelUtils.resources(getResources()))
                 .withVolumeMounts(getVolumeMounts())
+                .withImagePullPolicy(determineImagePullPolicy(imagePullPolicy, getImage()))
                 .build());
     }
 
@@ -240,7 +235,7 @@ public class EntityTopicOperator extends AbstractModel {
         varList.add(buildEnvVar(ENV_VAR_ZOOKEEPER_SESSION_TIMEOUT_MS, Integer.toString(zookeeperSessionTimeoutMs)));
         varList.add(buildEnvVar(ENV_VAR_TOPIC_METADATA_MAX_ATTEMPTS, String.valueOf(topicMetadataMaxAttempts)));
         varList.add(buildEnvVar(ENV_VAR_TLS_ENABLED, Boolean.toString(true)));
-        varList.add(buildEnvVar(ENV_VAR_STRIMZI_GC_LOG_OPTS, getGcLoggingOptions()));
+        varList.add(buildEnvVar(ENV_VAR_STRIMZI_GC_LOG_ENABLED, String.valueOf(gcLoggingEnabled)));
         return varList;
     }
 
