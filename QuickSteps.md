@@ -323,3 +323,10 @@ export JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk1.8.0_181.jdk/Contents/Hom
 export MVN_ARGS="-DskipTests -DskipITs"
 make docker_build
 ```
+
+* Publishing & Subscribing
+```
+oc run kafka-producer -ti --image=containers.cisco.com/jaganaga/kafka:0.9.0-kafka-2.2.1 --rm=true --restart=Never -- bin/kafka-console-producer.sh --broker-list my-cluster-kafka-bootstrap:9092 --topic my-topic
+
+oc run kafka-consumer -ti --image=strimzi/kafka:0.9.0-kafka-2.2.1 --rm=true --restart=Never -- bin/kafka-console-consumer.sh --bootstrap-server my-cluster-kafka-bootstrap:9092 --topic my-topic --from-beginning
+```
